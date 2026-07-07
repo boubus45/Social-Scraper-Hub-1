@@ -17,6 +17,8 @@ import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
 import PostCard from '@/components/PostCard';
 import PlatformBadge from '@/components/PlatformBadge';
+import { HeaderLogo } from '@/components/HeaderLogo';
+import { HeaderAvatar } from '@/components/HeaderAvatar';
 import { PlatformId, Post } from '@/types';
 import { PLATFORM_LIST } from '@/constants/platforms';
 
@@ -29,10 +31,7 @@ export default function FeedScreen() {
   const [activeFilter, setActiveFilter] = useState<FilterId>('all');
 
   const enabledPlatforms = PLATFORM_LIST.filter(p => settings.platforms[p.id].fetchEnabled);
-
-  const filtered = activeFilter === 'all'
-    ? posts
-    : posts.filter(p => p.platform === activeFilter);
+  const filtered = activeFilter === 'all' ? posts : posts.filter(p => p.platform === activeFilter);
 
   const handleCompose = useCallback((post: Post) => {
     startCompose(post);
@@ -44,9 +43,7 @@ export default function FeedScreen() {
     fetchPosts();
   };
 
-  const topPad = Platform.OS === 'web'
-    ? Math.max(insets.top, 67)
-    : insets.top;
+  const topPad = Platform.OS === 'web' ? Math.max(insets.top, 67) : insets.top;
 
   const renderEmpty = () => {
     if (isFetchingPosts) return null;
@@ -75,13 +72,17 @@ export default function FeedScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
+        <HeaderLogo onPress={() => router.push('/')} />
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Feed</Text>
-        <TouchableOpacity onPress={handleRefresh} style={styles.refreshBtn} activeOpacity={0.7}>
-          {isFetchingPosts
-            ? <ActivityIndicator size="small" color={colors.primary} />
-            : <Feather name="refresh-cw" size={20} color={colors.foreground} />
-          }
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={handleRefresh} style={styles.refreshBtn} activeOpacity={0.7}>
+            {isFetchingPosts
+              ? <ActivityIndicator size="small" color={colors.primary} />
+              : <Feather name="refresh-cw" size={20} color={colors.foreground} />
+            }
+          </TouchableOpacity>
+          <HeaderAvatar size={34} onPress={() => router.push('/settings')} />
+        </View>
       </View>
 
       {/* Platform filters */}
@@ -132,7 +133,7 @@ export default function FeedScreen() {
       {lastFetchError && (
         <View style={[styles.errorBanner, { backgroundColor: colors.destructive + '20', borderColor: colors.destructive + '40' }]}>
           <Feather name="alert-circle" size={14} color={colors.destructive} />
-          <Text style={[styles.errorText, { color: colors.destructive }]} numberOfLines={2}>{lastFetchError}</Text>
+          <Text style={[styles.errorText, { color: colors.destructive }]} numberOfLines={3}>{lastFetchError}</Text>
         </View>
       )}
 
@@ -143,10 +144,7 @@ export default function FeedScreen() {
         renderItem={({ item }) => (
           <PostCard post={item} onCompose={() => handleCompose(item)} />
         )}
-        contentContainerStyle={[
-          styles.listContent,
-          { paddingBottom: insets.bottom + 90 },
-        ]}
+        contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 90 }]}
         onRefresh={handleRefresh}
         refreshing={isFetchingPosts}
         ListEmptyComponent={renderEmpty}
@@ -161,26 +159,29 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
+    gap: 10,
   },
   headerTitle: {
-    fontSize: 28,
+    flex: 1,
+    fontSize: 22,
     fontFamily: 'Inter_700Bold',
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   refreshBtn: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  filterBar: {
-    borderBottomWidth: 1,
-    maxHeight: 52,
-  },
+  filterBar: { borderBottomWidth: 1, maxHeight: 52 },
   filterBarContent: {
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -193,38 +194,25 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
   },
-  filterText: {
-    fontSize: 13,
-    fontFamily: 'Inter_500Medium',
-  },
+  filterText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   errorBanner: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
     margin: 12,
     padding: 10,
     borderRadius: 8,
     borderWidth: 1,
   },
-  errorText: {
-    flex: 1,
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-  },
-  listContent: {
-    padding: 16,
-  },
+  errorText: { flex: 1, fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
+  listContent: { padding: 16 },
   emptyContainer: {
     alignItems: 'center',
     paddingTop: 60,
     paddingHorizontal: 40,
     gap: 12,
   },
-  emptyTitle: {
-    fontSize: 20,
-    fontFamily: 'Inter_600SemiBold',
-    marginTop: 8,
-  },
+  emptyTitle: { fontSize: 20, fontFamily: 'Inter_600SemiBold', marginTop: 8 },
   emptySubtitle: {
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
@@ -237,9 +225,5 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginTop: 8,
   },
-  settingsBtnText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  settingsBtnText: { color: '#FFF', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
 });

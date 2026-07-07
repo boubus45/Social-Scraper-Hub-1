@@ -19,7 +19,18 @@ import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
 import PlatformBadge from '@/components/PlatformBadge';
 import { PLATFORM_LIST } from '@/constants/platforms';
-import { AI_MODELS, AI_PROVIDER_LABELS, AIProvider, FETCH_FREQUENCY_LABELS, FetchFrequency, PlatformCredentials, PlatformId } from '@/types';
+import {
+  AI_MODELS,
+  AI_PROVIDER_LABELS,
+  AIProvider,
+  FETCH_FREQUENCY_LABELS,
+  FetchFrequency,
+  PlatformCredentials,
+  PlatformId,
+} from '@/types';
+
+// Platforms that support toggling API vs manual mode
+const API_TOGGLE_PLATFORMS: PlatformId[] = ['x', 'reddit'];
 
 function SectionHeader({ title, icon }: { title: string; icon: string }) {
   const colors = useColors();
@@ -28,35 +39,6 @@ function SectionHeader({ title, icon }: { title: string; icon: string }) {
       <Feather name={icon as any} size={14} color={colors.primary} />
       <Text style={[styles.sectionTitle, { color: colors.foreground }]}>{title}</Text>
     </View>
-  );
-}
-
-function SettingsRow({
-  label, value, onPress, rightElement, sublabel,
-}: {
-  label: string;
-  value?: string;
-  onPress?: () => void;
-  rightElement?: React.ReactNode;
-  sublabel?: string;
-}) {
-  const colors = useColors();
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={onPress ? 0.7 : 1}
-      style={[styles.row, { borderBottomColor: colors.border }]}
-    >
-      <View style={styles.rowLabel}>
-        <Text style={[styles.rowLabelText, { color: colors.foreground }]}>{label}</Text>
-        {sublabel && <Text style={[styles.rowSublabel, { color: colors.mutedForeground }]}>{sublabel}</Text>}
-      </View>
-      {rightElement ?? (
-        <Text style={[styles.rowValue, { color: colors.mutedForeground }]} numberOfLines={1}>
-          {value}
-        </Text>
-      )}
-    </TouchableOpacity>
   );
 }
 
@@ -99,41 +81,39 @@ export default function SettingsScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 90 }]}
     >
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: topPad + 12 }]}>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Settings</Text>
-      </View>
-
-      {/* Profile Section */}
-      <SectionHeader title="Profile" icon="user" />
-      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        {/* Avatar */}
-        <TouchableOpacity onPress={handlePickAvatar} style={styles.avatarRow} activeOpacity={0.8}>
-          <View style={[styles.avatarContainer, { borderColor: colors.primary + '60' }]}>
+      {/* ── Profile Hero (no top-left icon, big centered avatar) ── */}
+      <View style={[styles.profileHero, { paddingTop: topPad + 20 }]}>
+        <TouchableOpacity onPress={handlePickAvatar} activeOpacity={0.8} style={styles.avatarWrap}>
+          <View style={[styles.avatarOuter, { borderColor: colors.primary + '60' }]}>
             {settings.profile.avatarUri ? (
-              <Image source={{ uri: settings.profile.avatarUri }} style={styles.avatarImage} />
+              <Image source={{ uri: settings.profile.avatarUri }} style={styles.avatarImg} />
             ) : (
               <View style={[styles.avatarPlaceholder, { backgroundColor: colors.secondary }]}>
-                <Feather name="user" size={28} color={colors.mutedForeground} />
+                <Feather name="user" size={36} color={colors.mutedForeground} />
               </View>
             )}
-            <View style={[styles.avatarEdit, { backgroundColor: colors.primary }]}>
-              <Feather name="camera" size={10} color="#FFF" />
-            </View>
           </View>
-          <View style={styles.avatarInfo}>
-            <Text style={[styles.avatarName, { color: colors.foreground }]}>
-              {settings.profile.name || 'Your Name'}
-            </Text>
-            <Text style={[styles.avatarHandle, { color: colors.mutedForeground }]}>
-              {settings.profile.handle || '@yourhandle'}
-            </Text>
+          <View style={[styles.cameraBtn, { backgroundColor: colors.primary }]}>
+            <Feather name="camera" size={12} color="#FFF" />
           </View>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
         </TouchableOpacity>
 
-        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+        <Text style={[styles.heroName, { color: colors.foreground }]}>
+          {settings.profile.name || 'Your Name'}
+        </Text>
+        <Text style={[styles.heroHandle, { color: colors.mutedForeground }]}>
+          {settings.profile.handle || '@yourhandle'}
+        </Text>
+        {settings.profile.bio ? (
+          <Text style={[styles.heroBio, { color: colors.mutedForeground }]} numberOfLines={2}>
+            {settings.profile.bio}
+          </Text>
+        ) : null}
+      </View>
 
+      {/* Profile fields */}
+      <SectionHeader title="Profile" icon="user" />
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <InputRow
           label="Name"
           value={settings.profile.name}
@@ -159,7 +139,7 @@ export default function SettingsScreen() {
         />
       </View>
 
-      {/* AI Model Section */}
+      {/* ── AI Model ── */}
       <SectionHeader title="AI Model" icon="zap" />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Provider</Text>
@@ -226,22 +206,28 @@ export default function SettingsScreen() {
         </Text>
       </View>
 
-      {/* Social Networks */}
+      {/* ── Social Networks ── */}
       <SectionHeader title="Social Networks" icon="globe" />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         {PLATFORM_LIST.map((platform, idx) => {
           const pSettings = settings.platforms[platform.id];
           const isExpanded = expandedPlatform === platform.id;
           const isLast = idx === PLATFORM_LIST.length - 1;
+          const hasApiToggle = API_TOGGLE_PLATFORMS.includes(platform.id);
+          const credentialsLocked = hasApiToggle && !pSettings.useApi;
 
           return (
             <View key={platform.id}>
+              {/* Platform row */}
               <TouchableOpacity
                 onPress={() => {
                   Haptics.selectionAsync();
                   setExpandedPlatform(isExpanded ? null : platform.id);
                 }}
-                style={[styles.platformRow, { borderBottomColor: isLast && !isExpanded ? 'transparent' : colors.border }]}
+                style={[
+                  styles.platformRow,
+                  { borderBottomColor: isLast && !isExpanded ? 'transparent' : colors.border },
+                ]}
                 activeOpacity={0.7}
               >
                 <PlatformBadge platform={platform.id} size="md" />
@@ -272,36 +258,109 @@ export default function SettingsScreen() {
                 <Feather name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
               </TouchableOpacity>
 
+              {/* Expanded details */}
               {isExpanded && (
                 <View style={[styles.platformDetails, { borderBottomColor: isLast ? 'transparent' : colors.border }]}>
-                  <PlatformCredentialFields
-                    platform={platform.id}
-                    credentials={pSettings.credentials}
-                    onUpdate={(creds: Partial<PlatformCredentials>) => updatePlatformSettings(platform.id, { credentials: { ...pSettings.credentials, ...creds } })}
-                    secureFields={secureFields}
-                    toggleSecure={toggleSecure}
-                    colors={colors}
-                  />
+
+                  {/* API / Manual toggle — only for X and Reddit */}
+                  {hasApiToggle && (
+                    <View style={[styles.dataSourceRow, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+                      <View style={styles.dataSourceInfo}>
+                        <Text style={[styles.dataSourceLabel, { color: colors.foreground }]}>Data Source</Text>
+                        <Text style={[styles.dataSourceSub, { color: colors.mutedForeground }]}>
+                          {pSettings.useApi
+                            ? 'Fetch & post via API (credentials required)'
+                            : 'Manual — copy-paste / open app'}
+                        </Text>
+                      </View>
+                      <View style={styles.dataSourceChips}>
+                        <TouchableOpacity
+                          onPress={() => updatePlatformSettings(platform.id, { useApi: true })}
+                          style={[
+                            styles.modeChip,
+                            {
+                              backgroundColor: pSettings.useApi ? colors.primary : colors.card,
+                              borderColor: pSettings.useApi ? colors.primary : colors.border,
+                            },
+                          ]}
+                        >
+                          <Feather name="zap" size={11} color={pSettings.useApi ? '#FFF' : colors.mutedForeground} />
+                          <Text style={[styles.modeChipText, { color: pSettings.useApi ? '#FFF' : colors.mutedForeground }]}>API</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => updatePlatformSettings(platform.id, { useApi: false })}
+                          style={[
+                            styles.modeChip,
+                            {
+                              backgroundColor: !pSettings.useApi ? colors.card : 'transparent',
+                              borderColor: !pSettings.useApi ? colors.border : colors.border,
+                            },
+                          ]}
+                        >
+                          <Feather name="copy" size={11} color={!pSettings.useApi ? colors.foreground : colors.mutedForeground} />
+                          <Text style={[styles.modeChipText, { color: !pSettings.useApi ? colors.foreground : colors.mutedForeground }]}>Manual</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Credentials — greyed & locked when manual mode selected */}
+                  <View style={[
+                    credentialsLocked ? styles.lockedSection : undefined,
+                    credentialsLocked ? { pointerEvents: 'none' as const } : undefined,
+                  ]}>
+                    {credentialsLocked && (
+                      <View style={[styles.lockedBadge, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+                        <Feather name="lock" size={11} color={colors.mutedForeground} />
+                        <Text style={[styles.lockedText, { color: colors.mutedForeground }]}>
+                          API credentials not needed in manual mode
+                        </Text>
+                      </View>
+                    )}
+                    <PlatformCredentialFields
+                      platform={platform.id}
+                      credentials={pSettings.credentials}
+                      onUpdate={(creds: Partial<PlatformCredentials>) =>
+                        updatePlatformSettings(platform.id, { credentials: { ...pSettings.credentials, ...creds } })
+                      }
+                      secureFields={secureFields}
+                      toggleSecure={toggleSecure}
+                      colors={colors}
+                    />
+                  </View>
+
+                  {/* Followed accounts */}
                   <Text style={[styles.inputLabel, { color: colors.mutedForeground, marginTop: 12 }]}>
-                    {platform.id === 'reddit' ? 'Subreddits / u/usernames (comma-separated)' : 'Accounts to follow (comma-separated)'}
+                    {platform.id === 'reddit'
+                      ? 'Subreddits / u/usernames (comma-separated)'
+                      : 'Accounts to follow (comma-separated)'}
                   </Text>
                   <View style={[styles.inputWrapper, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
                     <TextInput
                       style={[styles.textInput, { color: colors.foreground }]}
                       value={pSettings.followedAccounts.join(', ')}
-                      onChangeText={v => updatePlatformSettings(platform.id, {
-                        followedAccounts: v.split(',').map(s => s.trim()).filter(Boolean),
-                      })}
-                      placeholder={platform.id === 'reddit' ? 'programming, technology, worldnews' : '@username1, @username2'}
+                      onChangeText={v =>
+                        updatePlatformSettings(platform.id, {
+                          followedAccounts: v.split(',').map(s => s.trim()).filter(Boolean),
+                        })
+                      }
+                      placeholder={
+                        platform.id === 'reddit'
+                          ? 'programming, technology, worldnews'
+                          : '@username1, @username2'
+                      }
                       placeholderTextColor={colors.mutedForeground}
                       autoCapitalize="none"
                     />
                   </View>
-                  {!platform.hasApi && (
+
+                  {/* No-API note for LinkedIn/FB/IG */}
+                  {!platform.hasApi && !hasApiToggle && (
                     <View style={[styles.noApiNote, { backgroundColor: colors.warning + '15', borderColor: colors.warning + '40' }]}>
                       <Feather name="info" size={12} color={colors.warning} />
                       <Text style={[styles.noApiText, { color: colors.warning }]}>
-                        {platform.name} doesn't offer a public API. Posting will be manual via the app.
+                        {platform.name} doesn't offer a public posting API. Posting will be manual.
+                        Fetching uses HTTP with session cookies if provided.
                       </Text>
                     </View>
                   )}
@@ -312,7 +371,7 @@ export default function SettingsScreen() {
         })}
       </View>
 
-      {/* Preferences */}
+      {/* ── Preferences ── */}
       <SectionHeader title="Preferences" icon="sliders" />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Auto-fetch frequency</Text>
@@ -339,6 +398,8 @@ export default function SettingsScreen() {
     </ScrollView>
   );
 }
+
+// ─── Sub-components ───────────────────────────────────────────────────────
 
 function InputRow({
   label, value, onChange, placeholder, multiline, last, colors,
@@ -375,7 +436,7 @@ function PlatformCredentialFields({
   const fields: Array<{ key: string; label: string; placeholder: string; secure?: boolean }> =
     platform === 'x'
       ? [
-          { key: 'bearerToken', label: 'Bearer Token', placeholder: 'AAAA...', secure: true },
+          { key: 'bearerToken', label: 'Bearer Token', placeholder: 'AAA...', secure: true },
           { key: 'apiKey', label: 'API Key', placeholder: 'API key', secure: true },
           { key: 'apiSecret', label: 'API Secret', placeholder: 'API secret', secure: true },
           { key: 'accessToken', label: 'Access Token', placeholder: 'Access token', secure: true },
@@ -401,7 +462,7 @@ function PlatformCredentialFields({
             <TextInput
               style={[styles.textInput, { color: colors.foreground, flex: 1 }]}
               value={(credentials as Record<string, string | undefined>)[field.key] ?? ''}
-              onChangeText={v => onUpdate({ [field.key]: v })}
+              onChangeText={v => onUpdate({ [field.key]: v } as Partial<PlatformCredentials>)}
               placeholder={field.placeholder}
               placeholderTextColor={colors.mutedForeground}
               secureTextEntry={field.secure && !secureFields[`${platform}_${field.key}`]}
@@ -423,18 +484,71 @@ function PlatformCredentialFields({
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingHorizontal: 16, gap: 8 },
-  header: {
-    paddingHorizontal: 4,
-    paddingBottom: 16,
+
+  // Profile hero
+  profileHero: {
+    alignItems: 'center',
+    paddingBottom: 24,
+    gap: 6,
   },
-  headerTitle: {
-    fontSize: 28,
+  avatarWrap: {
+    position: 'relative',
+    marginBottom: 4,
+  },
+  avatarOuter: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: 2.5,
+    overflow: 'visible',
+  },
+  avatarImg: {
+    width: 83,
+    height: 83,
+    borderRadius: 41.5,
+  },
+  avatarPlaceholder: {
+    width: 83,
+    height: 83,
+    borderRadius: 41.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraBtn: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#0D0D14',
+  },
+  heroName: {
+    fontSize: 20,
     fontFamily: 'Inter_700Bold',
-    letterSpacing: -0.5,
+    letterSpacing: -0.3,
   },
+  heroHandle: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+  },
+  heroBio: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+    lineHeight: 19,
+    marginTop: 2,
+    paddingHorizontal: 32,
+  },
+
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -449,6 +563,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
+
   card: {
     borderRadius: 16,
     borderWidth: 1,
@@ -456,44 +571,76 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 4,
   },
-  avatarRow: {
+
+  // Data source toggle
+  dataSourceRow: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    gap: 10,
+    marginBottom: 4,
+  },
+  dataSourceInfo: { gap: 2 },
+  dataSourceLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  dataSourceSub: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  dataSourceChips: { flexDirection: 'row', gap: 8 },
+  modeChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
   },
-  avatarContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 2,
-    position: 'relative',
-  },
-  avatarImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-  },
-  avatarPlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  modeChipText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
+
+  // Locked / greyed credentials
+  lockedSection: { opacity: 0.38 },
+  lockedBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
   },
-  avatarEdit: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+  lockedText: { fontSize: 12, fontFamily: 'Inter_400Regular', flex: 1 },
+
+  platformRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 10,
+    borderBottomWidth: 1,
   },
-  avatarInfo: { flex: 1 },
-  avatarName: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
-  avatarHandle: { fontSize: 13, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  divider: { height: 1 },
+  platformMeta: { flex: 1 },
+  platformToggles: { flexDirection: 'row', gap: 16, alignItems: 'center' },
+  toggleItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  toggleLabel: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+
+  platformDetails: {
+    paddingTop: 4,
+    paddingBottom: 16,
+    gap: 8,
+    borderBottomWidth: 1,
+  },
+
+  noApiNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 7,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  noApiText: { fontSize: 12, fontFamily: 'Inter_400Regular', flex: 1, lineHeight: 17 },
+
+  credRow: { gap: 4 },
+
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -501,69 +648,70 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
   },
-  rowLabel: { flex: 1 },
-  rowLabelText: { fontSize: 14, fontFamily: 'Inter_400Regular' },
-  rowSublabel: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 1 },
-  rowValue: { fontSize: 14, fontFamily: 'Inter_400Regular', maxWidth: 150 },
-  inputRow: { gap: 6, paddingVertical: 8 },
-  inputLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', letterSpacing: 0.5, textTransform: 'uppercase' },
+  rowLabel: { flex: 1, gap: 2 },
+  rowLabelText: { fontSize: 15, fontFamily: 'Inter_400Regular' },
+  rowSublabel: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  rowValue: { fontSize: 14, fontFamily: 'Inter_400Regular', maxWidth: 160 },
+
+  inputRow: { gap: 6, paddingVertical: 6 },
+  inputLabel: { fontSize: 12, fontFamily: 'Inter_500Medium' },
   inlineInput: {
     borderWidth: 1,
     borderRadius: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
   },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  optionChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  optionChipText: { fontSize: 12, fontFamily: 'Inter_500Medium' },
-  hint: { fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 16 },
-  platformRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-  },
-  platformMeta: { flex: 1, alignItems: 'flex-end' },
-  platformToggles: { flexDirection: 'row', gap: 16, alignItems: 'center' },
-  toggleItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  toggleLabel: { fontSize: 11, fontFamily: 'Inter_500Medium' },
-  platformDetails: {
-    paddingBottom: 16,
-    paddingTop: 8,
-    borderBottomWidth: 1,
-    gap: 8,
-  },
-  credRow: { gap: 4 },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 4,
+    gap: 8,
   },
   textInput: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: 'Inter_400Regular',
-    paddingVertical: 8,
+    minHeight: 20,
   },
   eyeBtn: { padding: 4 },
-  noApiNote: {
-    flexDirection: 'row',
-    gap: 6,
-    padding: 10,
+  hint: { fontSize: 11, fontFamily: 'Inter_400Regular' },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 8,
     borderWidth: 1,
-    marginTop: 4,
   },
-  noApiText: { flex: 1, fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 17 },
+  optionChipText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
+  divider: { height: 1, marginVertical: 4 },
+  avatarRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  avatarContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    position: 'relative',
+  },
+  avatarImage: { width: 60, height: 60, borderRadius: 30 },
+  avatarEdit: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#0D0D14',
+  },
+  avatarInfo: { flex: 1, gap: 3 },
+  avatarName: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+  avatarHandle: { fontSize: 13, fontFamily: 'Inter_400Regular' },
+  dividerLine: { height: 1, marginVertical: 4 },
 });

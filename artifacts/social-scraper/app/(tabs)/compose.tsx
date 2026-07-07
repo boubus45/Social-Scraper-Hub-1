@@ -16,6 +16,8 @@ import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
 import PlatformBadge from '@/components/PlatformBadge';
 import PlatformSelector from '@/components/PlatformSelector';
+import { HeaderLogo } from '@/components/HeaderLogo';
+import { HeaderAvatar } from '@/components/HeaderAvatar';
 import { PLATFORM_LIST } from '@/constants/platforms';
 import { PlatformId } from '@/types';
 
@@ -53,8 +55,11 @@ export default function ComposeScreen() {
   if (!composedPost) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
+        {/* Header */}
         <View style={[styles.header, { paddingTop: topPad + 12 }]}>
+          <HeaderLogo onPress={() => router.push('/')} />
           <Text style={[styles.headerTitle, { color: colors.foreground }]}>Compose</Text>
+          <HeaderAvatar size={34} onPress={() => router.push('/settings')} />
         </View>
         <View style={styles.emptyContainer}>
           <View style={[styles.emptyIcon, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -90,11 +95,13 @@ export default function ComposeScreen() {
     >
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
+        <HeaderLogo onPress={() => router.push('/')} />
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Compose</Text>
         <View style={styles.headerRight}>
           <TouchableOpacity onPress={clearCompose} activeOpacity={0.7} style={styles.clearBtn}>
             <Text style={[styles.clearBtnText, { color: colors.mutedForeground }]}>Clear</Text>
           </TouchableOpacity>
+          <HeaderAvatar size={34} onPress={() => router.push('/settings')} />
         </View>
       </View>
 
@@ -203,18 +210,19 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
     borderBottomWidth: 0,
     marginBottom: 4,
+    gap: 10,
   },
   headerTitle: {
-    fontSize: 28,
+    flex: 1,
+    fontSize: 22,
     fontFamily: 'Inter_700Bold',
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
   },
-  headerRight: { flexDirection: 'row', gap: 8 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   clearBtn: { paddingHorizontal: 8, paddingVertical: 4 },
   clearBtnText: { fontSize: 14, fontFamily: 'Inter_400Regular' },
   emptyContainer: {
@@ -232,11 +240,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  emptyTitle: {
-    fontSize: 22,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: -0.3,
-  },
+  emptyTitle: { fontSize: 22, fontFamily: 'Inter_700Bold', letterSpacing: -0.3 },
   emptySubtitle: {
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
@@ -252,15 +256,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     marginTop: 4,
   },
-  newPostBtnText: {
-    color: '#FFF',
-    fontSize: 15,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  feedLink: {
-    fontSize: 14,
-    fontFamily: 'Inter_500Medium',
-  },
+  newPostBtnText: { color: '#FFF', fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  feedLink: { fontSize: 14, fontFamily: 'Inter_500Medium' },
   originalCard: {
     borderRadius: 12,
     borderWidth: 1,
@@ -269,37 +266,12 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3,
     borderLeftColor: '#6366F1',
   },
-  originalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  originalLabel: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-    flex: 1,
-  },
-  originalAuthor: {
-    fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  originalContent: {
-    fontSize: 13,
-    fontFamily: 'Inter_400Regular',
-    lineHeight: 19,
-  },
-  editorCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  editor: {
-    minHeight: 140,
-    padding: 14,
-    fontSize: 15,
-    fontFamily: 'Inter_400Regular',
-    lineHeight: 23,
-  },
+  originalHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  originalLabel: { fontSize: 12, fontFamily: 'Inter_400Regular', flex: 1 },
+  originalAuthor: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  originalContent: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 19 },
+  editorCard: { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
+  editor: { minHeight: 140, padding: 14, fontSize: 15, fontFamily: 'Inter_400Regular', lineHeight: 23 },
   editorFooter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -308,10 +280,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  charCount: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-  },
+  charCount: { fontSize: 12, fontFamily: 'Inter_400Regular' },
   aiTag: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -320,10 +289,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 8,
   },
-  aiTagText: {
-    fontSize: 11,
-    fontFamily: 'Inter_500Medium',
-  },
+  aiTagText: { fontSize: 11, fontFamily: 'Inter_500Medium' },
   aiBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -340,25 +306,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   aiBtnText: { flex: 1 },
-  aiBtnTitle: {
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  aiBtnSubtitle: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-    marginTop: 1,
-  },
-  section: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 14,
-    gap: 12,
-  },
-  enableHint: {
-    fontSize: 13,
-    fontFamily: 'Inter_500Medium',
-  },
+  aiBtnTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  aiBtnSubtitle: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 1 },
+  section: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 12 },
+  enableHint: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   previewBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -368,8 +319,5 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginTop: 8,
   },
-  previewBtnText: {
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  previewBtnText: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
 });

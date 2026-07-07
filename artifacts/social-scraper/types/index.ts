@@ -29,6 +29,7 @@ export interface PlatformCredentials {
 export interface PlatformSettings {
   fetchEnabled: boolean;
   postEnabled: boolean;
+  useApi: boolean; // true = use API/HTTP, false = copy-paste/open-app manual mode
   credentials: PlatformCredentials;
   followedAccounts: string[];
 }
