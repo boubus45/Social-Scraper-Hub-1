@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -31,16 +32,20 @@ export default function EditScreen() {
   const {
     posts, composedPost, startCompose, updateBaseContent,
     toggleSelectedPlatform, settings, rephrasePost, applyRephrase, isRephrasing,
+    addComposedMedia, removeComposedMedia, setComposedMedia,
   } = useApp();
 
   const [showAISheet, setShowAISheet] = useState(false);
   const [selectedTone, setSelectedTone] = useState<AITone>('engaging');
   const [rephrasePlatform, setRephrasePlatform] = useState<PlatformId | undefined>();
+  const [showAddUrlModal, setShowAddUrlModal] = useState(false);
+  const [pendingUrl, setPendingUrl] = useState('');
+  const [isFetchingMedia, setIsFetchingMedia] = useState(false);
+  const urlInputRef = useRef<TextInput>(null);
 
   const post = postId !== 'new' ? posts.find(p => p.id === postId) : undefined;
 
   useEffect(() => {
-    // Re-initialize only if postId changed and this is a different post than currently composing
     if (composedPost?.originalPost?.id === postId) return;
     const foundPost = posts.find(p => p.id === postId);
     startCompose(foundPost);
@@ -86,6 +91,68 @@ export default function EditScreen() {
     router.push('/preview');
   };
 
+  /** Copy media URLs from the original post into the compose state */
+  const handleFetchFromOriginal = () => {
+    const sourceMedia = composedPost?.originalPost?.media ?? [];
+    if (sourceMedia.length === 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setComposedMedia([...sourceMedia]);
+  };
+
+  /** Validate and add a manually-entered image URL */
+  const handleAddUrl = () => {
+    const url = pendingUrl.trim();
+    if (!url) return;
+    if (!/^https?:\/\/.+/i.test(url)) {
+      Alert.alert('Invalid URL', 'Please enter a full URL starting with http:// or https://');
+      return;
+    }
+    addComposedMedia(url);
+    setPendingUrl('');
+    setShowAddUrlModal(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  /** Try to validate the image URL is reachable before adding (best-effort, bounded by a timeout) */
+  const handleFetchUrl = async () => {
+    const url = pendingUrl.trim();
+    if (!url || !/^https?:\/\/.+/i.test(url)) {
+      Alert.alert('Invalid URL', 'Enter a full URL starting with http:// or https://');
+      return;
+    }
+    // Web browsers routinely block cross-origin HEAD requests via CORS — skip validation there
+    // and on any environment, bound the request with a timeout so the UI never hangs.
+    if (Platform.OS === 'web') {
+      handleAddUrl();
+      return;
+    }
+    setIsFetchingMedia(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await fetch(url, { method: 'HEAD', signal: controller.signal });
+      const ct = res.headers.get('content-type') ?? '';
+      if (!ct.startsWith('image/') && !ct.startsWith('video/')) {
+        Alert.alert(
+          'Not an image/video',
+          `The URL returned content-type "${ct}". Add it anyway?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Add anyway', onPress: handleAddUrl },
+          ]
+        );
+        return;
+      }
+      handleAddUrl();
+    } catch {
+      // Network error, timeout, or CORS block — just add the URL as-is
+      handleAddUrl();
+    } finally {
+      clearTimeout(timeout);
+      setIsFetchingMedia(false);
+    }
+  };
+
   if (!composedPost) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
@@ -95,6 +162,9 @@ export default function EditScreen() {
   }
 
   const charCount = composedPost.baseContent.length;
+  const composedMedia = composedPost.media ?? [];
+  const originalMedia = composedPost.originalPost?.media ?? [];
+  const hasOriginalMedia = originalMedia.length > 0;
 
   return (
     <ScrollView
@@ -115,6 +185,19 @@ export default function EditScreen() {
           <Text style={[styles.originalContent, { color: colors.mutedForeground }]} numberOfLines={4}>
             {composedPost.originalPost.content}
           </Text>
+          {/* Original media strip (read-only preview) */}
+          {originalMedia.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.origMediaRow}>
+              {originalMedia.map((uri, i) => (
+                <Image
+                  key={i}
+                  source={{ uri }}
+                  style={styles.origThumb}
+                  resizeMode="cover"
+                />
+              ))}
+            </ScrollView>
+          )}
         </View>
       )}
 
@@ -140,6 +223,99 @@ export default function EditScreen() {
             </View>
           )}
         </View>
+      </View>
+
+      {/* ─── Media section ─────────────────────────────────────────────── */}
+      <View style={[styles.mediaCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        {/* Header row */}
+        <View style={styles.mediaHeader}>
+          <View style={styles.mediaHeaderLeft}>
+            <Feather name="image" size={15} color={colors.mutedForeground} />
+            <Text style={[styles.mediaSectionTitle, { color: colors.foreground }]}>Media</Text>
+            {composedMedia.length > 0 && (
+              <View style={[styles.mediaBadge, { backgroundColor: colors.primary }]}>
+                <Text style={styles.mediaBadgeText}>{composedMedia.length}</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.mediaHeaderActions}>
+            {hasOriginalMedia && (
+              <TouchableOpacity
+                onPress={handleFetchFromOriginal}
+                activeOpacity={0.8}
+                style={[styles.fetchOrigBtn, { backgroundColor: colors.primary + '18', borderColor: colors.primary + '40' }]}
+              >
+                <Feather name="download" size={13} color={colors.primary} />
+                <Text style={[styles.fetchOrigBtnText, { color: colors.primary }]}>
+                  Fetch from post
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={() => { setPendingUrl(''); setShowAddUrlModal(true); }}
+              activeOpacity={0.8}
+              style={[styles.addUrlBtn, { backgroundColor: colors.secondary, borderColor: colors.border }]}
+            >
+              <Feather name="upload" size={13} color={colors.mutedForeground} />
+              <Text style={[styles.addUrlBtnText, { color: colors.mutedForeground }]}>Add image</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Divider */}
+        <View style={[styles.mediaDivider, { backgroundColor: colors.border }]} />
+
+        {/* Thumbnails / empty state */}
+        {composedMedia.length > 0 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaScroll}>
+            {composedMedia.map((uri, i) => (
+              <View key={i} style={styles.mediaTile}>
+                <Image source={{ uri }} style={styles.mediaTileImg} resizeMode="cover" />
+                {/* Video badge */}
+                {/\.(mp4|mov|webm|m3u8)/i.test(uri) && (
+                  <View style={styles.videoBadge}>
+                    <Feather name="play" size={10} color="#FFF" />
+                  </View>
+                )}
+                {/* Remove button */}
+                <TouchableOpacity
+                  onPress={() => removeComposedMedia(i)}
+                  activeOpacity={0.8}
+                  style={styles.removeBtn}
+                >
+                  <Feather name="x" size={11} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+            ))}
+            {/* Add-more tile */}
+            <TouchableOpacity
+              onPress={() => { setPendingUrl(''); setShowAddUrlModal(true); }}
+              activeOpacity={0.8}
+              style={[styles.addMoreTile, { backgroundColor: colors.secondary, borderColor: colors.border }]}
+            >
+              <Feather name="plus" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </ScrollView>
+        ) : (
+          <View style={styles.mediaEmpty}>
+            <Feather name="image" size={28} color={colors.border} />
+            <Text style={[styles.mediaEmptyText, { color: colors.mutedForeground }]}>
+              No media attached
+            </Text>
+            {hasOriginalMedia && (
+              <TouchableOpacity
+                onPress={handleFetchFromOriginal}
+                activeOpacity={0.8}
+                style={[styles.fetchOrigBtnLarge, { backgroundColor: colors.primary + '18', borderColor: colors.primary + '40' }]}
+              >
+                <Feather name="download" size={14} color={colors.primary} />
+                <Text style={[styles.fetchOrigBtnLargeText, { color: colors.primary }]}>
+                  Fetch {originalMedia.length} image{originalMedia.length !== 1 ? 's' : ''} from original post
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </View>
 
       {/* AI Rephrase button */}
@@ -188,7 +364,85 @@ export default function EditScreen() {
         <Feather name="arrow-right" size={18} color="#FFF" />
       </TouchableOpacity>
 
-      {/* AI Rephrase Modal */}
+      {/* ─── Add image URL modal ────────────────────────────────────────── */}
+      <Modal
+        visible={showAddUrlModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAddUrlModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowAddUrlModal(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[styles.modalSheet, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
+            <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+            <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Add Image / Video</Text>
+            <Text style={[styles.sheetSubtitle, { color: colors.mutedForeground }]}>
+              Paste a direct URL to an image or video file
+            </Text>
+
+            <TextInput
+              ref={urlInputRef}
+              value={pendingUrl}
+              onChangeText={setPendingUrl}
+              placeholder="https://example.com/photo.jpg"
+              placeholderTextColor={colors.mutedForeground}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              style={[styles.urlInput, {
+                color: colors.foreground,
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+              }]}
+              onSubmitEditing={handleFetchUrl}
+            />
+
+            {/* Live preview */}
+            {pendingUrl.trim().length > 8 && /^https?:\/\//i.test(pendingUrl.trim()) && (
+              <Image
+                source={{ uri: pendingUrl.trim() }}
+                style={[styles.urlPreviewImg, { backgroundColor: colors.secondary }]}
+                resizeMode="contain"
+              />
+            )}
+
+            <View style={styles.urlBtnRow}>
+              <TouchableOpacity
+                onPress={() => setShowAddUrlModal(false)}
+                activeOpacity={0.8}
+                style={[styles.urlCancelBtn, { backgroundColor: colors.secondary, borderColor: colors.border }]}
+              >
+                <Text style={[styles.urlCancelBtnText, { color: colors.mutedForeground }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={Platform.OS === 'web' ? handleAddUrl : handleFetchUrl}
+                activeOpacity={0.85}
+                disabled={isFetchingMedia || !pendingUrl.trim()}
+                style={[styles.urlAddBtn, {
+                  backgroundColor: colors.primary,
+                  opacity: isFetchingMedia || !pendingUrl.trim() ? 0.55 : 1,
+                }]}
+              >
+                {isFetchingMedia
+                  ? <ActivityIndicator size="small" color="#FFF" />
+                  : <>
+                      <Feather name="plus" size={15} color="#FFF" />
+                      <Text style={styles.urlAddBtnText}>Add</Text>
+                    </>
+                }
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ─── AI Rephrase modal ──────────────────────────────────────────── */}
       <Modal
         visible={showAISheet}
         transparent
@@ -210,7 +464,6 @@ export default function EditScreen() {
               Choose a tone and optionally target a specific platform
             </Text>
 
-            {/* Tone selector */}
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TONE</Text>
             <View style={styles.toneGrid}>
               {TONES.map(tone => (
@@ -232,7 +485,6 @@ export default function EditScreen() {
               ))}
             </View>
 
-            {/* Platform target */}
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TARGET PLATFORM (optional)</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.platformRow}>
               <TouchableOpacity
@@ -298,6 +550,8 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16, gap: 12 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  // Original post
   originalCard: {
     borderRadius: 12,
     borderWidth: 1,
@@ -314,6 +568,15 @@ const styles = StyleSheet.create({
   originalLabel: { fontSize: 12, fontFamily: 'Inter_400Regular' },
   originalAuthor: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   originalContent: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 19 },
+  origMediaRow: { marginTop: 4, maxHeight: 80 },
+  origThumb: {
+    width: 80,
+    height: 68,
+    borderRadius: 8,
+    marginRight: 8,
+  },
+
+  // Editor
   editorCard: { borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
   editor: {
     minHeight: 160,
@@ -340,6 +603,120 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   aiTagText: { fontSize: 11, fontFamily: 'Inter_500Medium' },
+
+  // Media card
+  mediaCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  mediaHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  mediaHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  mediaSectionTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  mediaBadge: {
+    width: 18, height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaBadgeText: { fontSize: 11, fontFamily: 'Inter_600SemiBold', color: '#FFF' },
+  mediaHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  fetchOrigBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  fetchOrigBtnText: { fontSize: 12, fontFamily: 'Inter_500Medium' },
+  addUrlBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  addUrlBtnText: { fontSize: 12, fontFamily: 'Inter_500Medium' },
+  mediaDivider: { height: 1, marginHorizontal: 0 },
+
+  // Media thumbnails
+  mediaScroll: { paddingHorizontal: 12, paddingVertical: 12, maxHeight: 120 },
+  mediaTile: {
+    width: 88,
+    height: 88,
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginRight: 8,
+    position: 'relative',
+  },
+  mediaTileImg: { width: '100%', height: '100%' },
+  videoBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderRadius: 6,
+    padding: 3,
+  },
+  removeBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderRadius: 12,
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addMoreTile: {
+    width: 88,
+    height: 88,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  mediaEmpty: {
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+  },
+  mediaEmptyText: { fontSize: 13, fontFamily: 'Inter_400Regular' },
+  fetchOrigBtnLarge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 2,
+  },
+  fetchOrigBtnLargeText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
+
+  // AI button
   aiBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -367,6 +744,46 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   previewBtnText: { color: '#FFF', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+
+  // Add URL modal
+  urlInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+  },
+  urlPreviewImg: {
+    width: '100%',
+    height: 160,
+    borderRadius: 10,
+  },
+  urlBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  urlCancelBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  urlCancelBtnText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
+  urlAddBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 13,
+    borderRadius: 12,
+  },
+  urlAddBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#FFF' },
+
+  // Shared modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',

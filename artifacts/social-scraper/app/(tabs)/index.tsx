@@ -27,7 +27,7 @@ type FilterId = 'all' | PlatformId;
 export default function FeedScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { posts, isFetchingPosts, fetchPosts, lastFetchError, startCompose, settings } = useApp();
+  const { posts, isFetchingPosts, fetchPosts, lastFetchError, isDemoMode, startCompose, settings } = useApp();
   const [activeFilter, setActiveFilter] = useState<FilterId>('all');
 
   const enabledPlatforms = PLATFORM_LIST.filter(p => settings.platforms[p.id].fetchEnabled);
@@ -129,6 +129,16 @@ export default function FeedScreen() {
         })}
       </ScrollView>
 
+      {/* Demo mode notice */}
+      {isDemoMode && !lastFetchError && (
+        <View style={[styles.demoBanner, { backgroundColor: colors.primary + '18', borderColor: colors.primary + '40' }]}>
+          <Feather name="info" size={14} color={colors.primary} />
+          <Text style={[styles.demoText, { color: colors.primary }]} numberOfLines={2}>
+            Showing sample posts. Enable platforms in Settings to fetch real content.
+          </Text>
+        </View>
+      )}
+
       {/* Error */}
       {lastFetchError && (
         <View style={[styles.errorBanner, { backgroundColor: colors.destructive + '20', borderColor: colors.destructive + '40' }]}>
@@ -205,6 +215,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   errorText: { flex: 1, fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
+  demoBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    margin: 12,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  demoText: { flex: 1, fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
   listContent: { padding: 16 },
   emptyContainer: {
     alignItems: 'center',

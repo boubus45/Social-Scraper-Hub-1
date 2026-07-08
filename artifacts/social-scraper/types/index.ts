@@ -90,6 +90,7 @@ export interface Post {
   likes?: number;
   reposts?: number;
   comments?: number;
+  /** Image / video URLs extracted from the original post */
   media?: string[];
 }
 
@@ -105,6 +106,8 @@ export interface ComposedPost {
   drafts: Partial<Record<PlatformId, PlatformDraft>>;
   selectedPlatforms: PlatformId[];
   aiRephrased: boolean;
+  /** Media URLs to attach to the published post */
+  media: string[];
 }
 
 export type AITone = 'professional' | 'casual' | 'concise' | 'expanded' | 'engaging';
