@@ -9,6 +9,8 @@ import {
   PlatformId,
   Post,
 } from '@/types';
+import { Alert } from 'react-native';
+import { PLATFORM_POSTERS, hasPostingCredentials } from '@/lib/platformPosters';
 import { PLATFORMS } from '@/constants/platforms';
 
 const STORAGE_KEY = '@socialscraper/settings';
@@ -520,7 +522,7 @@ interface AppContextType {
   removeComposedMedia: (index: number) => void;
   // Drafts
   drafts: Draft[];
-  saveDraft: (scheduledAt?: string) => Promise<string | undefined>;
+  saveDraft: (scheduledAt?: string, redditTarget?: string) => Promise<string | undefined>;
   loadDraft: (draftId: string) => void;
   deleteDraft: (draftId: string) => Promise<void>;
   updateDraftSchedule: (draftId: string, scheduledAt: string | undefined) => Promise<void>;
@@ -722,8 +724,62 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setComposedPost(prev => prev ? { ...prev, selectedPlatforms: platforms } : null);
   }, []);
 
+  // ─── Scheduler ────────────────────────────────────────────────────────────
+  const executeScheduledDraft = useCallback(async (draft: Draft) => {
+    const s = settingsRef.current;
+    const results: Draft['postResults'] = {};
+
+    for (const pid of draft.composedPost.selectedPlatforms) {
+      const pSettings = s.platforms[pid];
+      if (!pSettings?.postEnabled) continue;
+      if (!hasPostingCredentials(pid, pSettings.credentials)) continue;
+
+      const poster = PLATFORM_POSTERS[pid];
+      if (!poster) continue;
+
+      const content = draft.composedPost.drafts[pid]?.edited
+        ? draft.composedPost.drafts[pid]!.content
+        : draft.composedPost.baseContent;
+
+      const extra = pid === 'reddit' && draft.redditTarget ? { subreddit: draft.redditTarget } : undefined;
+      results[pid] = await poster(content, pSettings.credentials, extra);
+    }
+
+    // Update draft with results then remove it
+    const next = draftsRef.current.filter(d => d.id !== draft.id);
+    setDrafts(next);
+    await AsyncStorage.setItem(DRAFTS_KEY, JSON.stringify(next));
+
+    // Alert summary
+    const lines = Object.entries(results).map(([pid, r]) =>
+      r.ok ? `✓ ${pid}${r.url ? ` — ${r.url}` : ''}` : `✗ ${pid}: ${r.error}`
+    );
+    const skipped = draft.composedPost.selectedPlatforms.filter(pid => !results[pid]);
+    if (skipped.length) lines.push(`⚠ Skipped (no credentials): ${skipped.join(', ')}`);
+
+    Alert.alert(
+      lines.every(l => l.startsWith('✓')) ? '🚀 Scheduled post published!' : '⚠ Scheduled post — partial',
+      lines.join('\n'),
+    );
+  }, []);
+
+  // Check scheduled drafts every 30 s while app is open
+  useEffect(() => {
+    const tick = async () => {
+      const now = Date.now();
+      const due = draftsRef.current.filter(
+        d => d.scheduledAt && new Date(d.scheduledAt).getTime() <= now,
+      );
+      for (const draft of due) {
+        await executeScheduledDraft(draft);
+      }
+    };
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, [executeScheduledDraft]);
+
   // ─── Drafts ───────────────────────────────────────────────────────────────
-  const saveDraft = useCallback(async (scheduledAt?: string): Promise<string | undefined> => {
+  const saveDraft = useCallback(async (scheduledAt?: string, redditTarget?: string): Promise<string | undefined> => {
     const cp = composedPostRef.current;
     if (!cp || !cp.baseContent.trim()) return undefined;
     const draft: Draft = {
@@ -731,6 +787,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       composedPost: { ...cp },
       savedAt: new Date().toISOString(),
       scheduledAt,
+      redditTarget,
     };
     const next = [draft, ...draftsRef.current];
     setDrafts(next);

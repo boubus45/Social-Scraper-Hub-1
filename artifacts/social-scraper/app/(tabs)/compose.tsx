@@ -22,6 +22,7 @@ import { HeaderLogo } from '@/components/HeaderLogo';
 import { HeaderAvatar } from '@/components/HeaderAvatar';
 import { PLATFORM_LIST } from '@/constants/platforms';
 import { Draft, PlatformId } from '@/types';
+import { hasPostingCredentials } from '@/lib/platformPosters';
 
 // ─── Schedule picker modal ─────────────────────────────────────────────────
 
@@ -29,25 +30,35 @@ function ScheduleModal({
   visible,
   onClose,
   onSchedule,
+  selectedPlatforms,
+  platformSettings,
 }: {
   visible: boolean;
   onClose: () => void;
-  onSchedule: (isoDate: string) => void;
+  onSchedule: (isoDate: string, redditTarget: string) => void;
+  selectedPlatforms: PlatformId[];
+  platformSettings: Record<string, { postEnabled: boolean; credentials: Record<string, unknown> }>;
 }) {
   const colors = useColors();
-  const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
-
-  // Default: tomorrow, same hour
-  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const [dateStr, setDateStr] = useState(
     `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`
   );
   const [timeStr, setTimeStr] = useState(`${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`);
+  const [redditTarget, setRedditTarget] = useState('');
+
+  // Compute which platforms will auto-post
+  const willPost = selectedPlatforms.filter(pid => {
+    const ps = platformSettings[pid];
+    return ps?.postEnabled && hasPostingCredentials(pid, ps.credentials as Parameters<typeof hasPostingCredentials>[1]);
+  });
+  const wontPost = selectedPlatforms.filter(p => !willPost.includes(p));
+
+  const hasReddit = willPost.includes('reddit');
 
   const handleConfirm = () => {
-    const combined = `${dateStr}T${timeStr}:00`;
-    const dt = new Date(combined);
+    const dt = new Date(`${dateStr}T${timeStr}:00`);
     if (isNaN(dt.getTime())) {
       Alert.alert('Invalid date/time', 'Enter date as YYYY-MM-DD and time as HH:MM.');
       return;
@@ -56,63 +67,108 @@ function ScheduleModal({
       Alert.alert('Choose a future time', 'The scheduled time must be in the future.');
       return;
     }
+    if (willPost.length === 0) {
+      Alert.alert(
+        'No platforms will auto-post',
+        'None of the selected platforms have API credentials configured. Add credentials in Settings first, or save as a plain draft instead.',
+      );
+      return;
+    }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onSchedule(dt.toISOString());
+    onSchedule(dt.toISOString(), redditTarget.trim().replace(/^r\//, ''));
     onClose();
   };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={sched.overlay}>
-        <View style={[sched.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={sched.handle} />
-          <View style={sched.header}>
-            <Feather name="clock" size={18} color={colors.primary} />
-            <Text style={[sched.title, { color: colors.foreground }]}>Schedule Post</Text>
-          </View>
-          <Text style={[sched.subtitle, { color: colors.mutedForeground }]}>
-            The post will be saved as a scheduled draft. You can post it from Drafts at the scheduled time.
-          </Text>
+        <ScrollView keyboardShouldPersistTaps="handled">
+          <View style={[sched.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={sched.handle} />
+            <View style={sched.header}>
+              <Feather name="clock" size={18} color={colors.primary} />
+              <Text style={[sched.title, { color: colors.foreground }]}>Schedule Post</Text>
+            </View>
 
-          <View style={sched.fieldGroup}>
-            <Text style={[sched.label, { color: colors.mutedForeground }]}>Date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={[sched.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
-              value={dateStr}
-              onChangeText={setDateStr}
-              placeholder="2026-07-20"
-              placeholderTextColor={colors.mutedForeground}
-              keyboardType="numbers-and-punctuation"
-              autoCapitalize="none"
-            />
-          </View>
+            {/* Auto-post preview */}
+            {willPost.length > 0 ? (
+              <View style={[sched.autoRow, { backgroundColor: '#16a34a20', borderColor: '#16a34a44' }]}>
+                <Feather name="zap" size={13} color="#16a34a" />
+                <Text style={[sched.autoText, { color: '#16a34a' }]}>
+                  Will auto-post to: {willPost.join(', ')}
+                </Text>
+              </View>
+            ) : (
+              <View style={[sched.autoRow, { backgroundColor: colors.destructive + '18', borderColor: colors.destructive + '44' }]}>
+                <Feather name="alert-circle" size={13} color={colors.destructive} />
+                <Text style={[sched.autoText, { color: colors.destructive }]}>
+                  No platforms with API credentials — post won't fire automatically.
+                </Text>
+              </View>
+            )}
+            {wontPost.length > 0 && (
+              <Text style={[sched.skipNote, { color: colors.mutedForeground }]}>
+                ⚠ Skipped (no credentials): {wontPost.join(', ')}
+              </Text>
+            )}
 
-          <View style={sched.fieldGroup}>
-            <Text style={[sched.label, { color: colors.mutedForeground }]}>Time (HH:MM, 24-hour)</Text>
-            <TextInput
-              style={[sched.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
-              value={timeStr}
-              onChangeText={setTimeStr}
-              placeholder="14:30"
-              placeholderTextColor={colors.mutedForeground}
-              keyboardType="numbers-and-punctuation"
-              autoCapitalize="none"
-            />
-          </View>
+            <View style={sched.fieldGroup}>
+              <Text style={[sched.label, { color: colors.mutedForeground }]}>Date (YYYY-MM-DD)</Text>
+              <TextInput
+                style={[sched.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+                value={dateStr}
+                onChangeText={setDateStr}
+                placeholder="2026-07-20"
+                placeholderTextColor={colors.mutedForeground}
+                keyboardType="numbers-and-punctuation"
+                autoCapitalize="none"
+              />
+            </View>
 
-          <View style={sched.actions}>
-            <TouchableOpacity onPress={onClose} style={[sched.btn, { borderColor: colors.border }]}>
-              <Text style={[sched.btnText, { color: colors.mutedForeground }]}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              style={[sched.btn, sched.btnPrimary, { backgroundColor: colors.primary }]}
-            >
-              <Feather name="clock" size={14} color="#FFF" />
-              <Text style={[sched.btnText, { color: '#FFF' }]}>Schedule</Text>
-            </TouchableOpacity>
+            <View style={sched.fieldGroup}>
+              <Text style={[sched.label, { color: colors.mutedForeground }]}>Time (HH:MM, 24-hour)</Text>
+              <TextInput
+                style={[sched.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+                value={timeStr}
+                onChangeText={setTimeStr}
+                placeholder="14:30"
+                placeholderTextColor={colors.mutedForeground}
+                keyboardType="numbers-and-punctuation"
+                autoCapitalize="none"
+              />
+            </View>
+
+            {hasReddit && (
+              <View style={sched.fieldGroup}>
+                <Text style={[sched.label, { color: colors.mutedForeground }]}>
+                  Reddit subreddit to post to (e.g. programming)
+                </Text>
+                <TextInput
+                  style={[sched.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+                  value={redditTarget}
+                  onChangeText={setRedditTarget}
+                  placeholder="Leave blank to post to your profile"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+            )}
+
+            <View style={sched.actions}>
+              <TouchableOpacity onPress={onClose} style={[sched.btn, { borderColor: colors.border }]}>
+                <Text style={[sched.btnText, { color: colors.mutedForeground }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleConfirm}
+                style={[sched.btn, sched.btnPrimary, { backgroundColor: colors.primary }]}
+              >
+                <Feather name="clock" size={14} color="#FFF" />
+                <Text style={[sched.btnText, { color: '#FFF' }]}>Schedule</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -133,7 +189,12 @@ const sched = StyleSheet.create({
   handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#444', alignSelf: 'center', marginBottom: 4 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { fontSize: 18, fontFamily: 'Inter_700Bold' },
-  subtitle: { fontSize: 13, fontFamily: 'Inter_400Regular', lineHeight: 19 },
+  autoRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 7,
+    padding: 10, borderRadius: 8, borderWidth: 1,
+  },
+  autoText: { flex: 1, fontSize: 12, fontFamily: 'Inter_500Medium', lineHeight: 18 },
+  skipNote: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: -8 },
   fieldGroup: { gap: 6 },
   label: { fontSize: 12, fontFamily: 'Inter_500Medium' },
   input: {
@@ -146,14 +207,8 @@ const sched = StyleSheet.create({
   },
   actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
   btn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 13,
-    borderRadius: 12,
-    borderWidth: 1,
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 13, borderRadius: 12, borderWidth: 1,
   },
   btnPrimary: { borderWidth: 0 },
   btnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
@@ -301,13 +356,13 @@ export default function ComposeScreen() {
     }
   };
 
-  const handleSchedule = async (isoDate: string) => {
-    const id = await saveDraft(isoDate);
+  const handleSchedule = async (isoDate: string, redditTarget: string) => {
+    const id = await saveDraft(isoDate, redditTarget || undefined);
     if (id) {
       const d = new Date(isoDate);
       Alert.alert(
         'Scheduled ✓',
-        `Post scheduled for ${d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}. Resume it from Drafts to post when ready.`
+        `Post scheduled for ${d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}. The app will auto-post when the time hits (keep it open).`
       );
       clearCompose();
     }
@@ -529,6 +584,8 @@ export default function ComposeScreen() {
         visible={showScheduleModal}
         onClose={() => setShowScheduleModal(false)}
         onSchedule={handleSchedule}
+        selectedPlatforms={composedPost?.selectedPlatforms ?? []}
+        platformSettings={settings.platforms as unknown as Record<string, { postEnabled: boolean; credentials: Record<string, unknown> }>}
       />
     </ScrollView>
   );

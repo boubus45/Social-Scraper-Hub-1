@@ -115,6 +115,8 @@ export interface Draft {
   composedPost: ComposedPost;
   savedAt: string;        // ISO timestamp when saved
   scheduledAt?: string;   // ISO timestamp if scheduled for future posting
+  redditTarget?: string;  // Subreddit slug to post to (e.g. "programming" or "u_myuser")
+  postResults?: Record<string, { ok: boolean; url?: string; error?: string }>; // per-platform outcome
 }
 
 export type AITone = 'professional' | 'casual' | 'concise' | 'expanded' | 'engaging';
