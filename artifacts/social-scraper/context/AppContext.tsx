@@ -501,7 +501,6 @@ interface AppContextType {
   isFetchingPosts: boolean;
   isRephrasing: boolean;
   lastFetchError: string | null;
-  isDemoMode: boolean;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
   updatePlatformSettings: (platform: PlatformId, patch: Partial<AppSettings['platforms'][PlatformId]>) => Promise<void>;
   fetchPosts: () => Promise<void>;
@@ -528,13 +527,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isFetchingPosts, setIsFetchingPosts] = useState(false);
   const [isRephrasing, setIsRephrasing] = useState(false);
   const [lastFetchError, setLastFetchError] = useState<string | null>(null);
-  const [isDemoMode, setIsDemoMode] = useState(false);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const postsRef = useRef(posts);
   postsRef.current = posts;
-  const isDemoModeRef = useRef(isDemoMode);
-  isDemoModeRef.current = isDemoMode;
 
   useEffect(() => {
     (async () => {
@@ -558,12 +554,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const saved: Post[] = JSON.parse(postsRaw);
           if (saved.length > 0) {
             setPosts(saved);
-            return;
           }
         }
-        // No saved posts yet — show demo content on first launch
-        setPosts(getDemoPosts());
-        setIsDemoMode(true);
       } catch { /* ignore hydration errors */ }
     })();
   }, []);
@@ -658,37 +650,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       allPosts.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
       if (allPosts.length === 0) {
-        const hasPriorRealData = !isDemoModeRef.current && postsRef.current.length > 0;
-        if (hasPriorRealData) {
-          // Keep the last successful real fetch instead of masking it with demo content —
-          // this is likely a transient outage, not an empty account.
-          const errNote = fetchErrors.length > 0
-            ? fetchErrors.join('\n') + '\n\n⚠️ Showing your last successful fetch.'
-            : '⚠️ No new posts returned. Showing your last successful fetch.';
-          setLastFetchError(errNote);
+        if (postsRef.current.length > 0 && fetchErrors.length > 0) {
+          // Keep prior real posts on transient failure
+          setLastFetchError(fetchErrors.join('\n') + '\n\n⚠️ Showing your last successful fetch.');
         } else {
-          // No prior real data to fall back on — show demo posts so the feed isn't empty
-          setPosts(getDemoPosts());
-          setIsDemoMode(true);
+          setPosts([]);
           await AsyncStorage.removeItem(POSTS_KEY);
-          const errNote = fetchErrors.length > 0
-            ? fetchErrors.join('\n') + '\n\n📌 Showing sample posts — configure platforms in Settings to fetch real posts.'
-            : '📌 No enabled platforms returned posts. Showing sample posts — configure platforms in Settings.';
-          setLastFetchError(errNote);
+          if (fetchErrors.length > 0) setLastFetchError(fetchErrors.join('\n'));
+          else setLastFetchError('No posts returned. Configure platforms in Settings.');
         }
       } else {
         setPosts(allPosts);
-        setIsDemoMode(false);
         await AsyncStorage.setItem(POSTS_KEY, JSON.stringify(allPosts));
         if (fetchErrors.length > 0) setLastFetchError(fetchErrors.join('\n'));
       }
     } catch (e: unknown) {
       setLastFetchError(e instanceof Error ? e.message : 'Unknown error');
-      // Still show demo posts on hard failure
-      if (allPosts.length === 0) {
-        setPosts(getDemoPosts());
-        setIsDemoMode(true);
-      }
     } finally {
       setIsFetchingPosts(false);
     }
@@ -777,7 +754,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      settings, posts, composedPost, isFetchingPosts, isRephrasing, lastFetchError, isDemoMode,
+      settings, posts, composedPost, isFetchingPosts, isRephrasing, lastFetchError,
       updateSettings, updatePlatformSettings, fetchPosts,
       startCompose, clearCompose, updateBaseContent, updatePlatformDraft,
       toggleSelectedPlatform, setSelectedPlatforms,
