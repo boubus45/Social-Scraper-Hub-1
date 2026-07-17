@@ -180,8 +180,12 @@ async function fetchRedditPosts(accounts: string[]): Promise<Post[]> {
 
   for (const source of sources.slice(0, 5)) {
     try {
-      const isUser = source.startsWith('u/');
-      const slug = isUser ? source.replace('u/', '').trim() : source.trim();
+      const trimmed = source.trim();
+      const isUser = trimmed.startsWith('u/');
+      // Strip leading r/ or u/ prefix so users can type either "unsloth" or "r/unsloth"
+      const slug = isUser
+        ? trimmed.replace(/^u\//, '').trim()
+        : trimmed.replace(/^r\//, '').trim();
       const endpoint = isUser
         ? `https://www.reddit.com/user/${slug}/submitted.json?limit=20&raw_json=1`
         : `https://www.reddit.com/r/${slug}/hot.json?limit=20&raw_json=1`;

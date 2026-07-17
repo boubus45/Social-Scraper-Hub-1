@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -332,27 +332,15 @@ export default function SettingsScreen() {
                   {/* Followed accounts */}
                   <Text style={[styles.inputLabel, { color: colors.mutedForeground, marginTop: 12 }]}>
                     {platform.id === 'reddit'
-                      ? 'Subreddits / u/usernames (comma-separated)'
-                      : 'Accounts to follow (comma-separated)'}
+                      ? 'Subreddits / u/usernames — press ; or , to add'
+                      : 'Accounts to follow — press ; or , to add'}
                   </Text>
-                  <View style={[styles.inputWrapper, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
-                    <TextInput
-                      style={[styles.textInput, { color: colors.foreground }]}
-                      value={pSettings.followedAccounts.join(', ')}
-                      onChangeText={v =>
-                        updatePlatformSettings(platform.id, {
-                          followedAccounts: v.split(',').map(s => s.trim()).filter(Boolean),
-                        })
-                      }
-                      placeholder={
-                        platform.id === 'reddit'
-                          ? 'programming, technology, worldnews'
-                          : '@username1, @username2'
-                      }
-                      placeholderTextColor={colors.mutedForeground}
-                      autoCapitalize="none"
-                    />
-                  </View>
+                  <TagInput
+                    tags={pSettings.followedAccounts}
+                    onChange={tags => updatePlatformSettings(platform.id, { followedAccounts: tags })}
+                    placeholder={platform.id === 'reddit' ? 'programming, r/unsloth…' : '@username1…'}
+                    colors={colors}
+                  />
 
                   {/* No-API note for LinkedIn/FB/IG */}
                   {!platform.hasApi && !hasApiToggle && (
@@ -400,6 +388,81 @@ export default function SettingsScreen() {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────
+
+// ─── Tag / chip input ─────────────────────────────────────────────────────
+function TagInput({
+  tags,
+  onChange,
+  placeholder,
+  colors,
+}: {
+  tags: string[];
+  onChange: (tags: string[]) => void;
+  placeholder?: string;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const [inputValue, setInputValue] = useState('');
+  const inputRef = useRef<TextInput>(null);
+
+  const commitCurrent = (raw: string) => {
+    const trimmed = raw.trim().replace(/[,;]+$/, '').trim();
+    if (trimmed && !tags.includes(trimmed)) {
+      onChange([...tags, trimmed]);
+    }
+    setInputValue('');
+  };
+
+  const handleChangeText = (text: string) => {
+    // Commit on ; or , typed anywhere in the string
+    if (text.endsWith(';') || text.endsWith(',')) {
+      commitCurrent(text);
+      return;
+    }
+    setInputValue(text);
+  };
+
+  const handleKeyPress = ({ nativeEvent }: { nativeEvent: { key: string } }) => {
+    if (nativeEvent.key === 'Backspace' && inputValue === '' && tags.length > 0) {
+      onChange(tags.slice(0, -1));
+    }
+  };
+
+  const removeTag = (index: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onChange(tags.filter((_, i) => i !== index));
+  };
+
+  return (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={() => inputRef.current?.focus()}
+      style={[styles.tagInputContainer, { borderColor: colors.border, backgroundColor: colors.secondary }]}
+    >
+      {tags.map((tag, i) => (
+        <View key={i} style={[styles.tag, { backgroundColor: colors.primary + '22', borderColor: colors.primary + '55' }]}>
+          <Text style={[styles.tagText, { color: colors.primary }]}>{tag}</Text>
+          <TouchableOpacity onPress={() => removeTag(i)} hitSlop={{ top: 6, bottom: 6, left: 4, right: 6 }}>
+            <Feather name="x" size={11} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+      ))}
+      <TextInput
+        ref={inputRef}
+        style={[styles.tagTextInput, { color: colors.foreground, minWidth: tags.length === 0 ? 120 : 80 }]}
+        value={inputValue}
+        onChangeText={handleChangeText}
+        onKeyPress={handleKeyPress}
+        onSubmitEditing={() => commitCurrent(inputValue)}
+        placeholder={tags.length === 0 ? placeholder : '+ add…'}
+        placeholderTextColor={colors.mutedForeground}
+        autoCapitalize="none"
+        autoCorrect={false}
+        blurOnSubmit={false}
+        returnKeyType="done"
+      />
+    </TouchableOpacity>
+  );
+}
 
 function InputRow({
   label, value, onChange, placeholder, multiline, last, colors,
@@ -714,4 +777,36 @@ const styles = StyleSheet.create({
   avatarName: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
   avatarHandle: { fontSize: 13, fontFamily: 'Inter_400Regular' },
   dividerLine: { height: 1, marginVertical: 4 },
+
+  // Tag / chip input
+  tagInputContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 6,
+    gap: 6,
+    minHeight: 42,
+  },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  tagText: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  tagTextInput: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    flex: 1,
+  },
 });
