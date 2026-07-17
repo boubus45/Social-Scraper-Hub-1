@@ -110,6 +110,13 @@ export interface ComposedPost {
   media: string[];
 }
 
+export interface Draft {
+  id: string;
+  composedPost: ComposedPost;
+  savedAt: string;        // ISO timestamp when saved
+  scheduledAt?: string;   // ISO timestamp if scheduled for future posting
+}
+
 export type AITone = 'professional' | 'casual' | 'concise' | 'expanded' | 'engaging';
 
 export const AI_TONE_LABELS: Record<AITone, string> = {

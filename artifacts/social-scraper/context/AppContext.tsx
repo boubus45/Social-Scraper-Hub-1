@@ -4,6 +4,7 @@ import {
   AITone,
   AppSettings,
   ComposedPost,
+  Draft,
   PlatformCredentials,
   PlatformId,
   Post,
@@ -12,6 +13,7 @@ import { PLATFORMS } from '@/constants/platforms';
 
 const STORAGE_KEY = '@socialscraper/settings';
 const POSTS_KEY = '@socialscraper/posts';
+const DRAFTS_KEY = '@socialscraper/drafts';
 
 const defaultSettings: AppSettings = {
   profile: { name: '', handle: '', bio: '' },
@@ -516,6 +518,12 @@ interface AppContextType {
   setComposedMedia: (urls: string[]) => void;
   addComposedMedia: (url: string) => void;
   removeComposedMedia: (index: number) => void;
+  // Drafts
+  drafts: Draft[];
+  saveDraft: (scheduledAt?: string) => Promise<string | undefined>;
+  loadDraft: (draftId: string) => void;
+  deleteDraft: (draftId: string) => Promise<void>;
+  updateDraftSchedule: (draftId: string, scheduledAt: string | undefined) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -527,10 +535,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isFetchingPosts, setIsFetchingPosts] = useState(false);
   const [isRephrasing, setIsRephrasing] = useState(false);
   const [lastFetchError, setLastFetchError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const postsRef = useRef(posts);
   postsRef.current = posts;
+  const composedPostRef = useRef(composedPost);
+  composedPostRef.current = composedPost;
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
 
   useEffect(() => {
     (async () => {
@@ -552,10 +565,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const postsRaw = await AsyncStorage.getItem(POSTS_KEY);
         if (postsRaw) {
           const saved: Post[] = JSON.parse(postsRaw);
-          if (saved.length > 0) {
-            setPosts(saved);
-          }
+          if (saved.length > 0) setPosts(saved);
         }
+        const draftsRaw = await AsyncStorage.getItem(DRAFTS_KEY);
+        if (draftsRaw) setDrafts(JSON.parse(draftsRaw));
       } catch { /* ignore hydration errors */ }
     })();
   }, []);
@@ -594,8 +607,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (!pSettings.fetchEnabled) continue;
         const platform = pid as PlatformId;
 
-        // Manual mode: skip HTTP fetch for X and Reddit
-        if (pSettings.useApi === false && (platform === 'x' || platform === 'reddit')) continue;
+        // Manual mode: skip HTTP fetch for X only (Reddit's public JSON needs no credentials)
+        if (pSettings.useApi === false && platform === 'x') continue;
 
         if (platform === 'reddit') {
           try {
@@ -709,6 +722,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setComposedPost(prev => prev ? { ...prev, selectedPlatforms: platforms } : null);
   }, []);
 
+  // ─── Drafts ───────────────────────────────────────────────────────────────
+  const saveDraft = useCallback(async (scheduledAt?: string): Promise<string | undefined> => {
+    const cp = composedPostRef.current;
+    if (!cp || !cp.baseContent.trim()) return undefined;
+    const draft: Draft = {
+      id: generateId(),
+      composedPost: { ...cp },
+      savedAt: new Date().toISOString(),
+      scheduledAt,
+    };
+    const next = [draft, ...draftsRef.current];
+    setDrafts(next);
+    await AsyncStorage.setItem(DRAFTS_KEY, JSON.stringify(next));
+    return draft.id;
+  }, []);
+
+  const loadDraft = useCallback((draftId: string) => {
+    const draft = draftsRef.current.find(d => d.id === draftId);
+    if (draft) setComposedPost({ ...draft.composedPost });
+  }, []);
+
+  const deleteDraft = useCallback(async (draftId: string) => {
+    const next = draftsRef.current.filter(d => d.id !== draftId);
+    setDrafts(next);
+    await AsyncStorage.setItem(DRAFTS_KEY, JSON.stringify(next));
+  }, []);
+
+  const updateDraftSchedule = useCallback(async (draftId: string, scheduledAt: string | undefined) => {
+    const next = draftsRef.current.map(d =>
+      d.id === draftId ? { ...d, scheduledAt } : d
+    );
+    setDrafts(next);
+    await AsyncStorage.setItem(DRAFTS_KEY, JSON.stringify(next));
+  }, []);
+
   const setComposedMedia = useCallback((urls: string[]) => {
     setComposedPost(prev => prev ? { ...prev, media: urls } : null);
   }, []);
@@ -760,6 +808,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleSelectedPlatform, setSelectedPlatforms,
       rephrasePost, applyRephrase, getEffectiveContent,
       setComposedMedia, addComposedMedia, removeComposedMedia,
+      drafts, saveDraft, loadDraft, deleteDraft, updateDraftSchedule,
     }}>
       {children}
     </AppContext.Provider>
