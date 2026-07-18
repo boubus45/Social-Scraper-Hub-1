@@ -195,7 +195,12 @@ async function fetchRedditPosts(accounts: string[]): Promise<Post[]> {
         : `https://www.reddit.com/r/${slug}/hot.json?limit=20&raw_json=1`;
 
       const res = await fetch(endpoint, {
-        headers: { Accept: 'application/json' },
+        headers: {
+          Accept: 'application/json',
+          // Reddit blocks requests without a descriptive UA (returns 403/429).
+          // Format required by Reddit API rules: platform:appId:version (by /u/user)
+          'User-Agent': 'android:com.socialscraper.app:v1.0.0 (by /u/SocialScraperApp)',
+        },
       });
 
       if (!res.ok) {
