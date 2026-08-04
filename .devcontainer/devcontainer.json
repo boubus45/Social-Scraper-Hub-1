@@ -2,7 +2,10 @@
   "name": "Node 22 LTS (pnpm)",
   "image": "mcr.microsoft.com/vscode/devcontainers/javascript-node:0-22",
   "features": {
-    "ghcr.io/devcontainers/features/corepack:1": {}
+    "ghcr.io/devcontainers/features/corepack:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
   },
   "forwardPorts": [8081, 8082, 3000, 5173],
   "remoteUser": "vscode",
