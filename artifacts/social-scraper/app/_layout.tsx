@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AppProvider, useApp } from '@/context/AppContext';
@@ -113,7 +114,9 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <AppProvider>
             <GestureHandlerRootView>
-              <RootLayoutNav />
+              <KeyboardProvider>
+                <RootLayoutNav />
+              </KeyboardProvider>
             </GestureHandlerRootView>
           </AppProvider>
         </QueryClientProvider>
