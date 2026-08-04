@@ -1,6 +1,6 @@
 {
   "name": "Node 22 LTS (pnpm)",
-  "image": "mcr.microsoft.com/vscode/devcontainers/javascript-node:0-22",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:0-22",
   "features": {
     "ghcr.io/devcontainers/features/corepack:1": {},
     "ghcr.io/devcontainers/features/sshd:1": {
