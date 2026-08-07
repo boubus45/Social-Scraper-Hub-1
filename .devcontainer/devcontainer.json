@@ -1,13 +1,8 @@
 {
   "name": "Social Scraper Hub",
-  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
-  "features": {
-    "ghcr.io/devcontainers/features/sshd:1": {
-      "version": "latest"
-    }
-  },
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
   "remoteUser": "vscode",
-  "postCreateCommand": "corepack enable && corepack prepare pnpm@latest --activate && pnpm config set store-dir ~/.local/share/pnpm/store && pnpm install",
+  "postCreateCommand": "corepack enable && corepack prepare pnpm@latest --activate && pnpm install",
   "forwardPorts": [
     8081,
     19000,
