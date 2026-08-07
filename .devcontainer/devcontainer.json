@@ -2,10 +2,6 @@
   "name": "Social Scraper Hub",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/node:2": {
-      "version": "22",
-      "pnpm": "latest"
-    },
     "ghcr.io/devcontainers/features/sshd:1": {
       "version": "latest"
     }
