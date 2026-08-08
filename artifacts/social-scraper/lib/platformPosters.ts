@@ -36,7 +36,7 @@ function splitRedditContent(content: string): { title: string; text: string } {
 // ─── Reddit ───────────────────────────────────────────────────────────────
 
 /** Obtain a Reddit OAuth2 token via password grant (requires "script" app type). */
-async function getRedditToken(credentials: PlatformCredentials): Promise<string> {
+export async function getRedditToken(credentials: PlatformCredentials): Promise<string> {
   const { clientId, clientSecret, username, password } = credentials;
   if (!clientId || !clientSecret || !username || !password) {
     throw new Error('Reddit: clientId, clientSecret, username and password are all required.');
