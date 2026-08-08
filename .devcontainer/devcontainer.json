@@ -1,7 +1,7 @@
 {
   "name": "Social Scraper Hub",
-  "image": "mcr.microsoft.com/devcontainers/universal:2",
-  "postCreateCommand": "npm install -g pnpm && pnpm install",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+  "postCreateCommand": "pnpm install",
   "forwardPorts": [
     8081,
     19000,
