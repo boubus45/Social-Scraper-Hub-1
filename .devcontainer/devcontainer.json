@@ -1,13 +1,7 @@
 {
   "name": "Social Scraper Hub",
   "image": "mcr.microsoft.com/devcontainers/universal:2",
-  "features": {
-    "ghcr.io/devcontainers/features/node:1": {
-      "version": "22",
-      "nodeGypDependencies": true
-    }
-  },
-  "postCreateCommand": "corepack enable && corepack prepare pnpm@latest --activate && pnpm install",
+  "postCreateCommand": "npm install -g pnpm && pnpm install",
   "forwardPorts": [
     8081,
     19000,
