@@ -33,7 +33,7 @@ jobs:
           corepack prepare pnpm@latest --activate
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
       - name: Build Expo app (prepare native Android)
         working-directory: ./artifacts/social-scraper
