@@ -38,7 +38,7 @@ jobs:
       - name: Build Expo app (prepare native Android)
         working-directory: ./artifacts/social-scraper
         run: |
-          npx expo prebuild --platform android --clean --pnpm --no-install
+          npx expo prebuild --platform android --clean --pnpm
 
       - name: Build APK with Gradle
         working-directory: ./artifacts/social-scraper/android
