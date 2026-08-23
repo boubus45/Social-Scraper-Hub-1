@@ -1,0 +1,94 @@
+name: Build APK & Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Enable corepack and install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Expo app (prepare native Android)
+        working-directory: ./artifacts/social-scraper
+        run: |
+          npx expo prebuild --platform android --clean
+
+      - name: Build APK with Gradle
+        working-directory: ./artifacts/social-scraper/android
+        run: |
+          ./gradlew assembleRelease
+
+      - name: Locate built APK
+        id: apk
+        working-directory: ./artifacts/social-scraper/android
+        run: |
+          APK_PATH=$(find . -name "*.apk" -type f | grep -i release | head -n1)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found, trying debug build..."
+            ./gradlew assembleDebug
+            APK_PATH=$(find . -name "*.apk" -type f | grep -i debug | head -n1)
+          fi
+          if [ -z "$APK_PATH" ]; then
+            echo "ERROR: Could not find APK"
+            exit 1
+          fi
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "Found APK: $APK_PATH"
+
+      - name: Prepare release artifact
+        id: release
+        run: |
+          APK_PATH="${{ steps.apk.outputs.apk_path }}"
+          cp "$APK_PATH" ./social-scraper.apk
+          echo "artifact=social-scraper.apk" >> $GITHUB_OUTPUT
+          echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: social-scraper.apk
+          tag_name: build-${{ steps.release.outputs.SHA }}-${{ github.run_number }}
+          name: 'Social Scraper APK - Build ${{ github.run_number }}'
+          body: |
+            Automated APK build from commit ${{ steps.release.outputs.SHA }}
+            
+            **Install on Android:**
+            1. Download `social-scraper.apk` from this release
+            2. Transfer to your Android phone
+            3. Open file manager, tap the APK, and install
+            
+            **Branch:** ${{ github.ref }}
+            **Commit:** ${{ github.sha }}
+            **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
