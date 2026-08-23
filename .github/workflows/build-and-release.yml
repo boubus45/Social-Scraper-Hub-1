@@ -64,14 +64,15 @@ jobs:
 
       - name: Prepare release artifact
         id: release
+        working-directory: ./artifacts/social-scraper/android
         run: |
           APK_PATH="${{ steps.apk.outputs.apk_path }}"
           if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: APK not found at expected path"
-            find ./artifacts/social-scraper/android -name "*.apk" -type f
+            echo "ERROR: APK not found at $APK_PATH"
+            find . -name "*.apk" -type f
             exit 1
           fi
-          cp "$APK_PATH" ./social-scraper.apk
+          cp "$APK_PATH" ../../../social-scraper.apk
           echo "artifact=social-scraper.apk" >> $GITHUB_OUTPUT
           echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
