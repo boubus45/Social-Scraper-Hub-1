@@ -35,12 +35,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build Expo app (prepare native Android)
+            - name: Build Expo app (prepare native Android)
         working-directory: ./artifacts/social-scraper
-        env:
-          CI: true
         run: |
-          npx expo prebuild --platform android --clean --yes
+          npx expo prebuild --platform android --clean --no-install
+
 
       - name: Build APK with Gradle
         working-directory: ./artifacts/social-scraper/android
