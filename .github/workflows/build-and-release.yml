@@ -19,7 +19,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -37,8 +37,10 @@ jobs:
 
       - name: Build Expo app (prepare native Android)
         working-directory: ./artifacts/social-scraper
+        env:
+          CI: true
         run: |
-          npx expo prebuild --platform android --clean --pnpm
+          npx expo prebuild --platform android --clean --yes
 
       - name: Build APK with Gradle
         working-directory: ./artifacts/social-scraper/android
@@ -91,3 +93,4 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
