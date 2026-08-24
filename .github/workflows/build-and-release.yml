@@ -1,4 +1,4 @@
-name: Build APK & Release
+name: Build APK & Upload Artifact
 
 on:
   push:
@@ -40,60 +40,45 @@ jobs:
         run: |
           npx expo prebuild --platform android --clean --no-install
 
-      - name: Build APK with Gradle
+      - name: Build Debug APK with Gradle
         working-directory: ./artifacts/social-scraper/android
         run: |
-          ./gradlew assembleRelease
+          ./gradlew assembleDebug
 
       - name: Locate built APK
         id: apk
         working-directory: ./artifacts/social-scraper/android
         run: |
-          APK_PATH=$(find . -name "*.apk" -type f | grep -i release | head -n1)
+          APK_PATH=$(find . -name "*.apk" -type f | grep -i debug | head -n1)
+
           if [ -z "$APK_PATH" ]; then
-            echo "No APK found, trying debug build..."
-            ./gradlew assembleDebug
-            APK_PATH=$(find . -name "*.apk" -type f | grep -i debug | head -n1)
-          fi
-          if [ -z "$APK_PATH" ]; then
-            echo "ERROR: Could not find APK"
+            echo "ERROR: Could not find debug APK"
+            find . -name "*.apk" -type f
             exit 1
           fi
+
           echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
           echo "Found APK: $APK_PATH"
 
-      - name: Prepare release artifact
-        id: release
+      - name: Prepare APK artifact
         working-directory: ./artifacts/social-scraper/android
         run: |
           APK_PATH="${{ steps.apk.outputs.apk_path }}"
+
           if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
             echo "ERROR: APK not found at $APK_PATH"
             find . -name "*.apk" -type f
             exit 1
           fi
-          cp "$APK_PATH" ../../../social-scraper.apk
-          echo "artifact=social-scraper.apk" >> $GITHUB_OUTPUT
-          echo "SHA=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+          cp "$APK_PATH" ../../../social-scraper.apk
+
+          echo "APK copied successfully:"
+          ls -lh ../../../social-scraper.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: social-scraper.apk
-          tag_name: build-${{ steps.release.outputs.SHA }}-${{ github.run_number }}
-          name: 'Social Scraper APK - Build ${{ github.run_number }}'
-          body: |
-            Automated APK build from commit ${{ steps.release.outputs.SHA }}
-            
-            **Install on Android:**
-            1. Download `social-scraper.apk` from this release
-            2. Transfer to your Android phone
-            3. Open file manager, tap the APK, and install
-            
-            **Branch:** ${{ github.ref }}
-            **Commit:** ${{ github.sha }}
-            **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: social-scraper-debug-apk-${{ github.run_number }}
+          path: social-scraper.apk
+          retention-days: 7
