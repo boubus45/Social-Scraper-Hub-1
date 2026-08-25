@@ -40,12 +40,6 @@ jobs:
         run: |
           npx expo prebuild --platform android --clean --no-install
 
-      - name: Create JS bundle for release
-        working-directory: ./artifacts/social-scraper
-        run: |
-          mkdir -p android/app/src/main/assets
-          npx react-native bundle             --platform android             --dev false             --entry-file index.js             --bundle-output android/app/src/main/assets/index.android.bundle             --assets-dest android/app/src/main/res
-
       - name: Build Release APK with Gradle
         working-directory: ./artifacts/social-scraper/android
         run: |
