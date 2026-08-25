@@ -40,23 +40,21 @@ jobs:
         run: |
           npx expo prebuild --platform android --clean --no-install
 
-      - name: Build Debug APK with Gradle
+      - name: Build Release APK with Gradle
         working-directory: ./artifacts/social-scraper/android
         run: |
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease
 
       - name: Locate built APK
         id: apk
         working-directory: ./artifacts/social-scraper/android
         run: |
-          APK_PATH=$(find . -name "*.apk" -type f | grep -i debug | head -n1)
-
+          APK_PATH=$(find . -name "*.apk" -type f | grep -i release | head -n1)
           if [ -z "$APK_PATH" ]; then
-            echo "ERROR: Could not find debug APK"
+            echo "ERROR: Could not find release APK"
             find . -name "*.apk" -type f
             exit 1
           fi
-
           echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
           echo "Found APK: $APK_PATH"
 
@@ -64,21 +62,18 @@ jobs:
         working-directory: ./artifacts/social-scraper/android
         run: |
           APK_PATH="${{ steps.apk.outputs.apk_path }}"
-
           if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
             echo "ERROR: APK not found at $APK_PATH"
             find . -name "*.apk" -type f
             exit 1
           fi
-
           cp "$APK_PATH" ../../../social-scraper.apk
-
           echo "APK copied successfully:"
           ls -lh ../../../social-scraper.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: social-scraper-debug-apk-${{ github.run_number }}
+          name: social-scraper-release-apk-${{ github.run_number }}
           path: social-scraper.apk
           retention-days: 7
