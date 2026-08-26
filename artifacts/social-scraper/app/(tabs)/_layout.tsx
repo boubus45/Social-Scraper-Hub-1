@@ -5,12 +5,20 @@ import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Tabs } from 'expo-router';
 
-// Android / web layout — no iOS-only native modules imported here.
-// See _layout.ios.tsx for the iOS version with NativeTabs + expo-glass-effect.
+// iOS-only imports - lazy loaded to avoid Android crashes
+let NativeTabsModule: any = null;
+if (Platform.OS === 'ios') {
+  try {
+    NativeTabsModule = require('expo-router/unstable-native-tabs');
+  } catch {
+    // Fallback if module not available
+  }
+}
 
-export default function TabLayout() {
+function ClassicTabLayout() {
   const colors = useColors();
   const isDark = useColorScheme() === 'dark';
+  const isIOS = Platform.OS === 'ios';
   const isWeb = Platform.OS === 'web';
 
   return (
@@ -21,14 +29,16 @@ export default function TabLayout() {
         headerShown: false,
         tabBarStyle: {
           position: 'absolute',
-          backgroundColor: colors.background,
+          backgroundColor: isIOS ? 'transparent' : colors.background,
           borderTopWidth: 1,
           borderTopColor: colors.border,
           elevation: 0,
           height: isWeb ? 84 : undefined,
         },
         tabBarBackground: () =>
-          isWeb ? (
+          isIOS ? (
+            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+          ) : isWeb ? (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.card }]} />
           ) : null,
       }}
@@ -56,4 +66,38 @@ export default function TabLayout() {
       />
     </Tabs>
   );
+}
+
+function NativeTabLayout() {
+  if (!NativeTabsModule) return <ClassicTabLayout />;
+
+  const { Icon, Label, NativeTabs } = NativeTabsModule;
+
+  return (
+    <NativeTabs>
+      <NativeTabs.Trigger name="index">
+        <Icon sf={{ default: 'newspaper', selected: 'newspaper.fill' }} />
+        <Label>Feed</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="compose">
+        <Icon sf={{ default: 'square.and.pencil', selected: 'square.and.pencil' }} />
+        <Label>Compose</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="settings">
+        <Icon sf={{ default: 'gearshape', selected: 'gearshape.fill' }} />
+        <Label>Settings</Label>
+      </NativeTabs.Trigger>
+    </NativeTabs>
+  );
+}
+
+export default function TabLayout() {
+  const isIOS = Platform.OS === 'ios';
+
+  // Use native tabs only on iOS where they're supported
+  if (isIOS && NativeTabsModule) {
+    return <NativeTabLayout />;
+  }
+
+  return <ClassicTabLayout />;
 }
