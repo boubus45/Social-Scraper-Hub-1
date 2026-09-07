@@ -4,11 +4,17 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-apk:
     name: Build Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repo
@@ -67,9 +73,9 @@ jobs:
             find . -name "*.apk" -type f
             exit 1
           fi
-          cp "$APK_PATH" ../../../social-scraper.apk
+          cp "$APK_PATH" "${{ github.workspace }}/social-scraper.apk"
           echo "APK copied successfully:"
-          ls -lh ../../../social-scraper.apk
+          ls -lh "${{ github.workspace }}/social-scraper.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
