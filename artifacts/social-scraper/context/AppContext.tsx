@@ -36,7 +36,15 @@ function generateId(): string {
 
 /** Decode HTML entities that Reddit encodes in preview URLs (e.g. &amp; → &) */
 function decodeHtmlEntities(str: string): string {
-  return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  return str
+    .replace(/&#x27;|&#39;|&apos;/gi, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, decimal: string) => String.fromCodePoint(Number(decimal)))
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"');
 }
 
 /** Extract image / video URLs from a Reddit post's JSON data */
@@ -82,6 +90,79 @@ function extractRedditMedia(p: Record<string, unknown>): string[] {
   }
 
   return media;
+}
+
+/** Read a text value from an Atom XML element without adding an XML dependency. */
+function atomText(block: string, tag: string): string {
+  const match = block.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  return match?.[1] ?? '';
+}
+
+/** Read an attribute from an Atom XML element such as <link href="..." />. */
+function atomAttribute(block: string, tag: string, attribute: string): string {
+  const element = block.match(new RegExp(`<${tag}\\b[^>]*>`, 'i'))?.[0] ?? '';
+  const match = element.match(new RegExp(`${attribute}\\s*=\\s*["']([^"']+)["']`, 'i'));
+  return decodeHtmlEntities(match?.[1] ?? '');
+}
+
+/** Convert Reddit's HTML-encoded Atom content into readable post text. */
+function cleanAtomContent(value: string): string {
+  // Atom content is HTML-escaped once, and the embedded HTML may contain
+  // another layer of entities (for example &amp;#39; for an apostrophe).
+  const decoded = decodeHtmlEntities(decodeHtmlEntities(value));
+  return decodeHtmlEntities(
+    decoded
+      .replace(/<!\[CDATA\[|\]\]>/g, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p\s*>/gi, '\n')
+      .replace(/<[^>]*>/g, '')
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim(),
+  );
+}
+
+/** Parse Reddit's public Atom/RSS feed into the app's Post shape. */
+function parseRedditFeed(xml: string): Post[] {
+  const entries = xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
+
+  return entries.flatMap((entry, index) => {
+    const title = cleanAtomContent(atomText(entry, 'title'));
+    const description = cleanAtomContent(atomText(entry, 'content'))
+      .replace(/\s+submitted by\s+\/u\/\S+[\s\S]*$/i, '')
+      .trim();
+    const content = description && !/^\[?(link|comments)\]?$/i.test(description)
+      ? description
+      : title;
+    const id = atomText(entry, 'id').trim().replace(/^t3_/, '') || `rss_${index}`;
+    const authorName = cleanAtomContent(atomText(entry, 'name')).replace(/^\/u\//i, '').trim() || 'Reddit';
+    const url = atomAttribute(entry, 'link', 'href');
+    const timestamp = atomText(entry, 'published').trim() || atomText(entry, 'updated').trim();
+    const media = [
+      atomAttribute(entry, 'media:content', 'url'),
+      atomAttribute(entry, 'media:thumbnail', 'url'),
+      atomAttribute(entry, 'enclosure', 'url'),
+    ].filter(urlValue => /^https?:\/\//i.test(urlValue));
+
+    if (!title && !content) return [];
+
+    return [{
+      id: `reddit_${id}`,
+      platform: 'reddit',
+      author: authorName,
+      authorHandle: `u/${authorName}`,
+      content: content || title,
+      timestamp: Number.isNaN(new Date(timestamp).getTime())
+        ? new Date().toISOString()
+        : new Date(timestamp).toISOString(),
+      url: url || 'https://www.reddit.com',
+      likes: undefined,
+      comments: undefined,
+      reposts: 0,
+      media: media.length > 0 ? Array.from(new Set(media)) : undefined,
+    }];
+  });
 }
 
 // ─── Demo posts (shown when all API fetches yield nothing) ────────────────
@@ -167,9 +248,10 @@ function getDemoPosts(): Post[] {
   ];
 }
 
-// ─── Reddit (public JSON API, no auth needed) ─────────────────────────────
+// ─── Reddit (public RSS feed, no auth needed) ──────────────────────────────
 async function fetchRedditPosts(accounts: string[], credentials?: PlatformCredentials): Promise<Post[]> {
-  // Reddit's API works from mobile devices; on web the browser's CORS policy blocks it.
+  // Reddit's RSS feed is the supported no-credential public route. Reddit now
+  // frequently returns 403 to direct JSON requests, even with a User-Agent.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { Platform } = require('react-native') as typeof import('react-native');
   if (Platform.OS === 'web') {
@@ -195,14 +277,12 @@ async function fetchRedditPosts(accounts: string[], credentials?: PlatformCreden
         ? trimmed.replace(/^u\//, '').trim()
         : trimmed.replace(/^r\//, '').trim();
       const endpoint = isUser
-        ? `https://www.reddit.com/user/${slug}/submitted.json?limit=20&raw_json=1`
-        : `https://www.reddit.com/r/${slug}/hot.json?limit=20&raw_json=1`;
+        ? `https://www.reddit.com/user/${encodeURIComponent(slug)}/.rss?limit=20`
+        : `https://www.reddit.com/r/${encodeURIComponent(slug)}/.rss?limit=20`;
 
       const res = await fetch(endpoint, {
         headers: {
-          Accept: 'application/json',
-          // Reddit blocks requests without a descriptive UA (returns 403/429).
-          // Format required by Reddit API rules: platform:appId:version (by /u/user)
+          Accept: 'application/atom+xml, application/xml, text/xml',
           'User-Agent': 'android:com.socialscraper.app:v1.0.0 (by /u/SocialScraperApp)',
         },
       });
@@ -211,31 +291,8 @@ async function fetchRedditPosts(accounts: string[], credentials?: PlatformCreden
         errors.push(`${isUser ? 'u/' : 'r/'}${slug}: HTTP ${res.status}`);
         continue;
       }
-      const data = await res.json();
-      const children: unknown[] = data?.data?.children ?? [];
-
-      for (const child of children) {
-        const p = (child as { data: Record<string, unknown> }).data;
-        if (!p) continue;
-
-        const content = ((p.selftext as string) || (p.title as string)) ?? '';
-        // Skip empty/deleted posts
-        if (!content || content === '[deleted]' || content === '[removed]') continue;
-
-        posts.push({
-          id: `reddit_${p.id as string}`,
-          platform: 'reddit',
-          author: p.author as string,
-          authorHandle: `u/${p.author as string}`,
-          content,
-          timestamp: new Date((p.created_utc as number) * 1000).toISOString(),
-          url: `https://reddit.com${p.permalink as string}`,
-          likes: p.ups as number,
-          comments: p.num_comments as number,
-          reposts: 0,
-          media: extractRedditMedia(p),
-        });
-      }
+      const feedPosts = parseRedditFeed(await res.text());
+      posts.push(...feedPosts);
     } catch (err) {
       errors.push(`${source}: ${err instanceof Error ? err.message : 'failed'}`);
     }
@@ -679,12 +736,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (!pSettings.fetchEnabled) continue;
         const platform = pid as PlatformId;
 
-        // Manual mode: skip HTTP fetch for X only (Reddit's public JSON needs no credentials)
+        // Manual mode disables credentialed API access. Reddit still supports
+        // its public RSS feed, so it remains fetchable without credentials.
         if (pSettings.useApi === false && platform === 'x') continue;
 
         if (platform === 'reddit') {
           try {
-            const p = await fetchRedditPosts(pSettings.followedAccounts, pSettings.credentials);
+            const p = await fetchRedditPosts(
+              pSettings.followedAccounts,
+              pSettings.useApi ? pSettings.credentials : undefined,
+            );
             allPosts.push(...p);
           } catch (e) {
             fetchErrors.push(e instanceof Error ? e.message : String(e));
