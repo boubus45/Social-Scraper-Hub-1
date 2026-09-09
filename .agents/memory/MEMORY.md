@@ -1,0 +1,1 @@
+- [Reddit public fetching](reddit-public-fetch.md) — Direct JSON can return 403; public RSS works but needs paced requests to avoid burst 429s.

@@ -165,6 +165,10 @@ function parseRedditFeed(xml: string): Post[] {
   });
 }
 
+function waitMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // ─── Demo posts (shown when all API fetches yield nothing) ────────────────
 function getDemoPosts(): Post[] {
   const now = Date.now();
@@ -267,6 +271,7 @@ async function fetchRedditPosts(accounts: string[], credentials?: PlatformCreden
   const posts: Post[] = [];
   const errors: string[] = [];
   const sources = accounts.length > 0 ? accounts : ['programming'];
+  let lastRssRequestAt = 0;
 
   for (const source of sources.slice(0, 5)) {
     try {
@@ -277,18 +282,45 @@ async function fetchRedditPosts(accounts: string[], credentials?: PlatformCreden
         ? trimmed.replace(/^u\//, '').trim()
         : trimmed.replace(/^r\//, '').trim();
       const endpoint = isUser
-        ? `https://www.reddit.com/user/${encodeURIComponent(slug)}/.rss?limit=20`
-        : `https://www.reddit.com/r/${encodeURIComponent(slug)}/.rss?limit=20`;
+        ? `https://www.reddit.com/user/${encodeURIComponent(slug)}/.rss?limit=10`
+        : `https://www.reddit.com/r/${encodeURIComponent(slug)}/.rss?limit=10`;
 
-      const res = await fetch(endpoint, {
-        headers: {
-          Accept: 'application/atom+xml, application/xml, text/xml',
-          'User-Agent': 'android:com.socialscraper.app:v1.0.0 (by /u/SocialScraperApp)',
-        },
-      });
+      // Reddit applies burst limits to public RSS too. Space requests so a
+      // list of followed sources does not look like an automated scrape.
+      const elapsed = Date.now() - lastRssRequestAt;
+      if (lastRssRequestAt > 0 && elapsed < 1200) {
+        await waitMs(1200 - elapsed);
+      }
+
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        lastRssRequestAt = Date.now();
+        res = await fetch(endpoint, {
+          headers: {
+            Accept: 'application/atom+xml, application/xml, text/xml',
+            'User-Agent': 'android:com.socialscraper.app:v1.0.0 (by /u/SocialScraperApp)',
+          },
+        });
+
+        if (res.status !== 429 || attempt === 2) break;
+
+        const retryAfter = Number(res.headers.get('Retry-After'));
+        const retryDelay = Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(retryAfter * 1000, 8000)
+          : (attempt + 1) * 2500;
+        await waitMs(retryDelay);
+      }
+
+      if (!res) {
+        errors.push(`${isUser ? 'u/' : 'r/'}${slug}: request did not complete`);
+        continue;
+      }
 
       if (!res.ok) {
-        errors.push(`${isUser ? 'u/' : 'r/'}${slug}: HTTP ${res.status}`);
+        errors.push(
+          `${isUser ? 'u/' : 'r/'}${slug}: HTTP ${res.status}` +
+          (res.status === 429 ? ' (Reddit rate limit; try refresh again in a moment)' : ''),
+        );
         continue;
       }
       const feedPosts = parseRedditFeed(await res.text());
