@@ -50,7 +50,14 @@ export default function PostCard({ post, onCompose }: Props) {
     : post.content.slice(0, PREVIEW_LENGTH) + '…';
 
   return (
-    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <View style={[
+      styles.card,
+      {
+        backgroundColor: colors.card,
+        borderColor: post.isOfficial ? colors.warning : post.isNew ? colors.primary : colors.border,
+        borderLeftWidth: post.isOfficial || post.isNew ? 3 : 1,
+      },
+    ]}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.authorRow}>
@@ -68,7 +75,21 @@ export default function PostCard({ post, onCompose }: Props) {
             </Text>
           </View>
         </View>
-        <PlatformBadge platform={post.platform} size="sm" />
+        <View style={styles.badges}>
+          {post.isNew && (
+            <View style={[styles.newBadge, { backgroundColor: colors.primary }]}>
+              <Feather name="star" size={10} color="#FFF" />
+              <Text style={styles.newBadgeText}>NEW</Text>
+            </View>
+          )}
+          {post.isOfficial && (
+            <View style={[styles.officialBadge, { backgroundColor: colors.warning + '20', borderColor: colors.warning + '60' }]}>
+              <Feather name="check-circle" size={10} color={colors.warning} />
+              <Text style={[styles.officialBadgeText, { color: colors.warning }]}>SOURCE</Text>
+            </View>
+          )}
+          <PlatformBadge platform={post.platform} size="sm" />
+        </View>
       </View>
 
       {/* Content */}
@@ -136,6 +157,30 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  badges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  newBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  newBadgeText: { color: '#FFF', fontSize: 9, fontFamily: 'Inter_700Bold' },
+  officialBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  officialBadgeText: { fontSize: 9, fontFamily: 'Inter_700Bold' },
   authorRow: {
     flexDirection: 'row',
     alignItems: 'center',

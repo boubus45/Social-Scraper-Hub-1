@@ -92,6 +92,16 @@ export interface Post {
   comments?: number;
   /** Image / video URLs extracted from the original post */
   media?: string[];
+  /** Configured source that produced this post, e.g. r/unsloth or u/example */
+  sourceKey?: string;
+  sourceLabel?: string;
+  sourceKind?: 'subreddit' | 'user' | 'account';
+  /** True when a subreddit post was authored by the configured subreddit account. */
+  isOfficial?: boolean;
+  /** True only for posts discovered during the most recent successful fetch. */
+  isNew?: boolean;
+  fetchedAt?: string;
+  fetchBatchId?: string;
 }
 
 export interface PlatformDraft {

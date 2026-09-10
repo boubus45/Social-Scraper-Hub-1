@@ -1,10 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
@@ -32,16 +32,12 @@ export default function EditScreen() {
   const {
     posts, composedPost, startCompose, updateBaseContent,
     toggleSelectedPlatform, settings, rephrasePost, applyRephrase, isRephrasing,
-    addComposedMedia, removeComposedMedia, setComposedMedia,
+    removeComposedMedia, setComposedMedia,
   } = useApp();
 
   const [showAISheet, setShowAISheet] = useState(false);
   const [selectedTone, setSelectedTone] = useState<AITone>('engaging');
   const [rephrasePlatform, setRephrasePlatform] = useState<PlatformId | undefined>();
-  const [showAddUrlModal, setShowAddUrlModal] = useState(false);
-  const [pendingUrl, setPendingUrl] = useState('');
-  const [isFetchingMedia, setIsFetchingMedia] = useState(false);
-  const urlInputRef = useRef<TextInput>(null);
 
   const post = postId !== 'new' ? posts.find(p => p.id === postId) : undefined;
 
@@ -99,58 +95,22 @@ export default function EditScreen() {
     setComposedMedia([...sourceMedia]);
   };
 
-  /** Validate and add a manually-entered image URL */
-  const handleAddUrl = () => {
-    const url = pendingUrl.trim();
-    if (!url) return;
-    if (!/^https?:\/\/.+/i.test(url)) {
-      Alert.alert('Invalid URL', 'Please enter a full URL starting with http:// or https://');
+  /** Pick local images/videos. Original post media is already preloaded by startCompose. */
+  const handlePickFromGallery = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Gallery permission needed', 'Allow photo and video access to attach media from your phone.');
       return;
     }
-    addComposedMedia(url);
-    setPendingUrl('');
-    setShowAddUrlModal(false);
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      allowsMultipleSelection: true,
+      quality: 1,
+    });
+    if (result.canceled) return;
+    const picked = result.assets.map(asset => asset.uri);
+    setComposedMedia(Array.from(new Set([...(composedPost?.media ?? []), ...picked])));
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
-  /** Try to validate the image URL is reachable before adding (best-effort, bounded by a timeout) */
-  const handleFetchUrl = async () => {
-    const url = pendingUrl.trim();
-    if (!url || !/^https?:\/\/.+/i.test(url)) {
-      Alert.alert('Invalid URL', 'Enter a full URL starting with http:// or https://');
-      return;
-    }
-    // Web browsers routinely block cross-origin HEAD requests via CORS — skip validation there
-    // and on any environment, bound the request with a timeout so the UI never hangs.
-    if (Platform.OS === 'web') {
-      handleAddUrl();
-      return;
-    }
-    setIsFetchingMedia(true);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    try {
-      const res = await fetch(url, { method: 'HEAD', signal: controller.signal });
-      const ct = res.headers.get('content-type') ?? '';
-      if (!ct.startsWith('image/') && !ct.startsWith('video/')) {
-        Alert.alert(
-          'Not an image/video',
-          `The URL returned content-type "${ct}". Add it anyway?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Add anyway', onPress: handleAddUrl },
-          ]
-        );
-        return;
-      }
-      handleAddUrl();
-    } catch {
-      // Network error, timeout, or CORS block — just add the URL as-is
-      handleAddUrl();
-    } finally {
-      clearTimeout(timeout);
-      setIsFetchingMedia(false);
-    }
   };
 
   if (!composedPost) {
@@ -247,17 +207,17 @@ export default function EditScreen() {
               >
                 <Feather name="download" size={13} color={colors.primary} />
                 <Text style={[styles.fetchOrigBtnText, { color: colors.primary }]}>
-                  Fetch from post
+                  Use original
                 </Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              onPress={() => { setPendingUrl(''); setShowAddUrlModal(true); }}
+              onPress={handlePickFromGallery}
               activeOpacity={0.8}
               style={[styles.addUrlBtn, { backgroundColor: colors.secondary, borderColor: colors.border }]}
             >
-              <Feather name="upload" size={13} color={colors.mutedForeground} />
-              <Text style={[styles.addUrlBtnText, { color: colors.mutedForeground }]}>Add image</Text>
+              <Feather name="image" size={13} color={colors.mutedForeground} />
+              <Text style={[styles.addUrlBtnText, { color: colors.mutedForeground }]}>Gallery</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -289,7 +249,7 @@ export default function EditScreen() {
             ))}
             {/* Add-more tile */}
             <TouchableOpacity
-              onPress={() => { setPendingUrl(''); setShowAddUrlModal(true); }}
+              onPress={handlePickFromGallery}
               activeOpacity={0.8}
               style={[styles.addMoreTile, { backgroundColor: colors.secondary, borderColor: colors.border }]}
             >
@@ -310,10 +270,20 @@ export default function EditScreen() {
               >
                 <Feather name="download" size={14} color={colors.primary} />
                 <Text style={[styles.fetchOrigBtnLargeText, { color: colors.primary }]}>
-                  Fetch {originalMedia.length} image{originalMedia.length !== 1 ? 's' : ''} from original post
+                  Use {originalMedia.length} original item{originalMedia.length !== 1 ? 's' : ''}
                 </Text>
               </TouchableOpacity>
             )}
+            <TouchableOpacity
+              onPress={handlePickFromGallery}
+              activeOpacity={0.8}
+              style={[styles.fetchOrigBtnLarge, { backgroundColor: colors.secondary, borderColor: colors.border }]}
+            >
+              <Feather name="image" size={14} color={colors.mutedForeground} />
+              <Text style={[styles.fetchOrigBtnLargeText, { color: colors.mutedForeground }]}>
+                Choose from phone gallery
+              </Text>
+            </TouchableOpacity>
           </View>
         )}
       </View>
@@ -363,84 +333,6 @@ export default function EditScreen() {
         <Text style={styles.previewBtnText}>Preview & Post</Text>
         <Feather name="arrow-right" size={18} color="#FFF" />
       </TouchableOpacity>
-
-      {/* ─── Add image URL modal ────────────────────────────────────────── */}
-      <Modal
-        visible={showAddUrlModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowAddUrlModal(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowAddUrlModal(false)}
-        >
-          <TouchableOpacity
-            activeOpacity={1}
-            style={[styles.modalSheet, { backgroundColor: colors.card, borderColor: colors.border }]}
-          >
-            <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
-            <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Add Image / Video</Text>
-            <Text style={[styles.sheetSubtitle, { color: colors.mutedForeground }]}>
-              Paste a direct URL to an image or video file
-            </Text>
-
-            <TextInput
-              ref={urlInputRef}
-              value={pendingUrl}
-              onChangeText={setPendingUrl}
-              placeholder="https://example.com/photo.jpg"
-              placeholderTextColor={colors.mutedForeground}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              style={[styles.urlInput, {
-                color: colors.foreground,
-                backgroundColor: colors.background,
-                borderColor: colors.border,
-              }]}
-              onSubmitEditing={handleFetchUrl}
-            />
-
-            {/* Live preview */}
-            {pendingUrl.trim().length > 8 && /^https?:\/\//i.test(pendingUrl.trim()) && (
-              <Image
-                source={{ uri: pendingUrl.trim() }}
-                style={[styles.urlPreviewImg, { backgroundColor: colors.secondary }]}
-                resizeMode="contain"
-              />
-            )}
-
-            <View style={styles.urlBtnRow}>
-              <TouchableOpacity
-                onPress={() => setShowAddUrlModal(false)}
-                activeOpacity={0.8}
-                style={[styles.urlCancelBtn, { backgroundColor: colors.secondary, borderColor: colors.border }]}
-              >
-                <Text style={[styles.urlCancelBtnText, { color: colors.mutedForeground }]}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={Platform.OS === 'web' ? handleAddUrl : handleFetchUrl}
-                activeOpacity={0.85}
-                disabled={isFetchingMedia || !pendingUrl.trim()}
-                style={[styles.urlAddBtn, {
-                  backgroundColor: colors.primary,
-                  opacity: isFetchingMedia || !pendingUrl.trim() ? 0.55 : 1,
-                }]}
-              >
-                {isFetchingMedia
-                  ? <ActivityIndicator size="small" color="#FFF" />
-                  : <>
-                      <Feather name="plus" size={15} color="#FFF" />
-                      <Text style={styles.urlAddBtnText}>Add</Text>
-                    </>
-                }
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
 
       {/* ─── AI Rephrase modal ──────────────────────────────────────────── */}
       <Modal
@@ -744,44 +636,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   previewBtnText: { color: '#FFF', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
-
-  // Add URL modal
-  urlInput: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-  },
-  urlPreviewImg: {
-    width: '100%',
-    height: 160,
-    borderRadius: 10,
-  },
-  urlBtnRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 4,
-  },
-  urlCancelBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 13,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  urlCancelBtnText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
-  urlAddBtn: {
-    flex: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 13,
-    borderRadius: 12,
-  },
-  urlAddBtnText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: '#FFF' },
 
   // Shared modal styles
   modalOverlay: {

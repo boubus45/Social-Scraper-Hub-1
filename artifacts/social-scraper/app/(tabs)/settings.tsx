@@ -338,7 +338,7 @@ export default function SettingsScreen() {
                   <TagInput
                     tags={pSettings.followedAccounts}
                     onChange={tags => updatePlatformSettings(platform.id, { followedAccounts: tags })}
-                    placeholder={platform.id === 'reddit' ? 'programming, r/unsloth…' : '@username1…'}
+                     placeholder={platform.id === 'reddit' ? 'r/unsloth, u/hermesagent…' : '@username1…'}
                     colors={colors}
                   />
 

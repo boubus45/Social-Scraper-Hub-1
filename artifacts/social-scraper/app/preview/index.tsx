@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -8,11 +8,21 @@ import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
 import PlatformPreviewCard from '@/components/PlatformPreviewCard';
 import { PLATFORMS } from '@/constants/platforms';
+import { PlatformId } from '@/types';
+import { hasPostingCredentials } from '@/lib/platformPosters';
 
 export default function PreviewScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { composedPost, updatePlatformDraft, getEffectiveContent, clearCompose } = useApp();
+  const {
+    composedPost,
+    updatePlatformDraft,
+    getEffectiveContent,
+    clearCompose,
+    settings,
+    postNow,
+  } = useApp();
+  const [postModes, setPostModes] = useState<Record<string, 'manual' | 'api'>>({});
 
   if (!composedPost || composedPost.selectedPlatforms.length === 0) {
     return (
@@ -26,8 +36,18 @@ export default function PreviewScreen() {
     );
   }
 
-  const apiPlatforms = composedPost.selectedPlatforms.filter(pid => PLATFORMS[pid].hasApi);
-  const manualPlatforms = composedPost.selectedPlatforms.filter(pid => !PLATFORMS[pid].hasApi);
+  const canUseApi = (pid: PlatformId) => {
+    const platformSettings = settings.platforms[pid];
+    return Boolean(
+      PLATFORMS[pid].hasApi &&
+      platformSettings?.useApi &&
+      platformSettings.postEnabled &&
+      hasPostingCredentials(pid, platformSettings.credentials),
+    );
+  };
+
+  const getMode = (pid: PlatformId): 'manual' | 'api' =>
+    postModes[pid] ?? (canUseApi(pid) ? 'api' : 'manual');
 
   const handleDone = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -49,48 +69,28 @@ export default function PreviewScreen() {
         </Text>
       </View>
 
-      {/* API platforms */}
-      {apiPlatforms.length > 0 && (
-        <>
-          <View style={styles.sectionHeader}>
-            <Feather name="zap" size={14} color={colors.success} />
-            <Text style={[styles.sectionTitle, { color: colors.success }]}>Post via API</Text>
-          </View>
-          {apiPlatforms.map(pid => (
+        <View style={styles.sectionHeader}>
+          <Feather name="send" size={14} color={colors.primary} />
+          <Text style={[styles.sectionTitle, { color: colors.primary }]}>Choose how to post</Text>
+        </View>
+        <View style={[styles.manualNote, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.manualNoteText, { color: colors.mutedForeground }]}>
+            Open app is the default and pre-fills the message where the platform allows it. Choose Use API on a card only when API credentials are configured.
+          </Text>
+        </View>
+        {composedPost.selectedPlatforms.map(pid => (
             <PlatformPreviewCard
               key={pid}
               platform={PLATFORMS[pid]}
               content={getEffectiveContent(pid)}
               isEdited={composedPost.drafts[pid]?.edited ?? false}
               onContentChange={(text) => updatePlatformDraft(pid, text)}
+              mode={getMode(pid)}
+              canUseApi={canUseApi(pid)}
+              onModeChange={(mode) => setPostModes(prev => ({ ...prev, [pid]: mode }))}
+              onPost={() => postNow(pid, getEffectiveContent(pid))}
             />
-          ))}
-        </>
-      )}
-
-      {/* Manual platforms */}
-      {manualPlatforms.length > 0 && (
-        <>
-          <View style={styles.sectionHeader}>
-            <Feather name="upload" size={14} color={colors.warning} />
-            <Text style={[styles.sectionTitle, { color: colors.warning }]}>Post manually</Text>
-          </View>
-          <View style={[styles.manualNote, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.manualNoteText, { color: colors.mutedForeground }]}>
-              These platforms don't offer a public API. Copy your content and open the app to post manually.
-            </Text>
-          </View>
-          {manualPlatforms.map(pid => (
-            <PlatformPreviewCard
-              key={pid}
-              platform={PLATFORMS[pid]}
-              content={getEffectiveContent(pid)}
-              isEdited={composedPost.drafts[pid]?.edited ?? false}
-              onContentChange={(text) => updatePlatformDraft(pid, text)}
-            />
-          ))}
-        </>
-      )}
+        ))}
 
       {/* Done button */}
       <TouchableOpacity

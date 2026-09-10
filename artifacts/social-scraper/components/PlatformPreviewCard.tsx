@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Linking, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
@@ -10,11 +10,33 @@ interface Props {
   content: string;
   onContentChange: (text: string) => void;
   isEdited: boolean;
+  mode: 'manual' | 'api';
+  canUseApi: boolean;
+  onModeChange: (mode: 'manual' | 'api') => void;
+  onPost: () => Promise<{ ok: boolean; url?: string; error?: string }>;
 }
 
-export default function PlatformPreviewCard({ platform, content, onContentChange, isEdited }: Props) {
+function getPrefilledUrl(platform: PlatformDef, content: string): string | undefined {
+  const encoded = encodeURIComponent(content);
+  if (platform.id === 'x') return `https://x.com/intent/post?text=${encoded}`;
+  if (platform.id === 'reddit') return `https://www.reddit.com/submit?selftext=${encoded}&title=${encodeURIComponent(content.split('\n')[0].slice(0, 300))}`;
+  if (platform.id === 'facebook') return `https://www.facebook.com/sharer/sharer.php?quote=${encoded}`;
+  return undefined;
+}
+
+export default function PlatformPreviewCard({
+  platform,
+  content,
+  onContentChange,
+  isEdited,
+  mode,
+  canUseApi,
+  onModeChange,
+  onPost,
+}: Props) {
   const colors = useColors();
   const [isPosted, setIsPosted] = useState(false);
+  const [isPosting, setIsPosting] = useState(false);
   const charCount = content.length;
   const charLimit = platform.charLimit;
   const remaining = charLimit - charCount;
@@ -25,15 +47,46 @@ export default function PlatformPreviewCard({ platform, content, onContentChange
 
   const handleOpenPlatform = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const url = platform.webUrl ?? '';
-    const canOpen = await Linking.canOpenURL(url);
-    if (canOpen) Linking.openURL(url);
+    const prefilledUrl = getPrefilledUrl(platform, content);
+    if (prefilledUrl && await Linking.canOpenURL(prefilledUrl)) {
+      await Linking.openURL(prefilledUrl);
+      return;
+    }
+    // LinkedIn and Instagram do not expose a public text-prefill URL. Open
+    // their installed app first; if that is unavailable, the native share
+    // sheet still hands the selected app the complete message.
+    if (platform.appScheme && await Linking.canOpenURL(platform.appScheme)) {
+      await Linking.openURL(platform.appScheme);
+      return;
+    }
+    const result = await Share.share({ message: content, title: `${platform.name} post` });
+    if (result.action !== Share.dismissedAction) return;
+    const webUrl = platform.webUrl ?? '';
+    if (webUrl && await Linking.canOpenURL(webUrl)) await Linking.openURL(webUrl);
     else Alert.alert('Cannot open', `Could not open ${platform.name}`);
   };
 
-  const handleMarkPosted = () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setIsPosted(prev => !prev);
+  const handlePost = async () => {
+    if (isPosted || isPosting) return;
+    setIsPosting(true);
+    try {
+      if (mode === 'manual') {
+        await handleOpenPlatform();
+        setIsPosted(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return;
+      }
+      const result = await onPost();
+      if (!result.ok) {
+        Alert.alert('API posting unavailable', result.error ?? `Could not post to ${platform.name}.`);
+        return;
+      }
+      setIsPosted(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (result.url) Alert.alert('Posted', `${platform.name} published the post.`);
+    } finally {
+      setIsPosting(false);
+    }
   };
 
   return (
@@ -54,6 +107,30 @@ export default function PlatformPreviewCard({ platform, content, onContentChange
             <View style={styles.postedBadge}>
               <Feather name="check-circle" size={14} color="#22C55E" />
             </View>
+          )}
+        </View>
+      </View>
+
+      <View style={[styles.modeRow, { borderBottomColor: colors.border }]}>
+        <Text style={[styles.modeLabel, { color: colors.mutedForeground }]}>Posting method</Text>
+        <View style={[styles.modeSwitch, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+          <TouchableOpacity
+            onPress={() => onModeChange('manual')}
+            style={[styles.modeOption, mode === 'manual' && { backgroundColor: colors.primary }]}
+          >
+            <Text style={[styles.modeOptionText, { color: mode === 'manual' ? '#FFF' : colors.mutedForeground }]}>
+              Open app
+            </Text>
+          </TouchableOpacity>
+          {platform.hasApi && (
+            <TouchableOpacity
+              onPress={() => onModeChange('api')}
+              style={[styles.modeOption, mode === 'api' && { backgroundColor: colors.primary }]}
+            >
+              <Text style={[styles.modeOptionText, { color: mode === 'api' ? '#FFF' : colors.mutedForeground }]}>
+                {canUseApi ? 'Use API' : 'API setup'}
+              </Text>
+            </TouchableOpacity>
           )}
         </View>
       </View>
@@ -91,8 +168,9 @@ export default function PlatformPreviewCard({ platform, content, onContentChange
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            onPress={handleMarkPosted}
+            onPress={handlePost}
             activeOpacity={0.8}
+            disabled={isPosting}
             style={[
               styles.postedBtn,
               {
@@ -102,13 +180,13 @@ export default function PlatformPreviewCard({ platform, content, onContentChange
               },
             ]}
           >
-            <Feather
-              name={isPosted ? 'check-circle' : (platform.hasApi ? 'send' : 'copy')}
+              <Feather
+                name={isPosted ? 'check-circle' : (isPosting ? 'loader' : mode === 'api' ? 'send' : 'external-link')}
               size={13}
               color={isPosted ? colors.success : '#FFFFFF'}
             />
             <Text style={[styles.postedBtnText, { color: isPosted ? colors.success : '#FFFFFF' }]}>
-              {isPosted ? 'Posted' : platform.hasApi ? 'Post now' : 'Copy & post'}
+                {isPosted ? 'Posted' : isPosting ? 'Opening…' : mode === 'api' ? 'Post now' : 'Open & post'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -163,6 +241,24 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     lineHeight: 21,
   },
+  modeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  modeLabel: { fontSize: 11, fontFamily: 'Inter_500Medium' },
+  modeSwitch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 2,
+  },
+  modeOption: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 13 },
+  modeOptionText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -10,7 +10,7 @@ import {
   Post,
 } from '@/types';
 import { Alert } from 'react-native';
-import { PLATFORM_POSTERS, hasPostingCredentials, getRedditToken } from '@/lib/platformPosters';
+import { PLATFORM_POSTERS, hasPostingCredentials, getRedditToken, PostResult } from '@/lib/platformPosters';
 import { PLATFORMS } from '@/constants/platforms';
 
 const STORAGE_KEY = '@socialscraper/settings';
@@ -22,7 +22,7 @@ const defaultSettings: AppSettings = {
   ai: { provider: 'openai', model: 'gpt-4o-mini', apiKey: '' },
   platforms: {
     x: { fetchEnabled: false, postEnabled: false, useApi: false, credentials: {}, followedAccounts: [] },
-    reddit: { fetchEnabled: true, postEnabled: false, useApi: true, credentials: {}, followedAccounts: ['programming', 'technology', 'worldnews'] },
+    reddit: { fetchEnabled: true, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
     linkedin: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
     facebook: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
     instagram: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
@@ -124,7 +124,27 @@ function cleanAtomContent(value: string): string {
 }
 
 /** Parse Reddit's public Atom/RSS feed into the app's Post shape. */
-function parseRedditFeed(xml: string): Post[] {
+interface RedditSourceInfo {
+  key: string;
+  label: string;
+  slug: string;
+  isUser: boolean;
+}
+
+function normalizeRedditSource(source: string): RedditSourceInfo {
+  const trimmed = source.trim();
+  const isUser = trimmed.toLowerCase().startsWith('u/');
+  const slug = (isUser ? trimmed.replace(/^u\//i, '') : trimmed.replace(/^r\//i, '')).trim();
+  const normalizedSlug = slug.toLowerCase();
+  return {
+    key: `reddit:${isUser ? 'user' : 'subreddit'}:${normalizedSlug}`,
+    label: `${isUser ? 'u/' : 'r/'}${slug}`,
+    slug,
+    isUser,
+  };
+}
+
+function parseRedditFeed(xml: string, source: RedditSourceInfo): Post[] {
   const entries = xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
 
   return entries.flatMap((entry, index) => {
@@ -161,95 +181,16 @@ function parseRedditFeed(xml: string): Post[] {
       comments: undefined,
       reposts: 0,
       media: media.length > 0 ? Array.from(new Set(media)) : undefined,
+      sourceKey: source.key,
+      sourceLabel: source.label,
+      sourceKind: source.isUser ? 'user' : 'subreddit',
+      isOfficial: !source.isUser && authorName.toLowerCase() === source.slug.toLowerCase(),
     }];
   });
 }
 
 function waitMs(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// ─── Demo posts (shown when all API fetches yield nothing) ────────────────
-function getDemoPosts(): Post[] {
-  const now = Date.now();
-  return [
-    {
-      id: 'demo_reddit_1',
-      platform: 'reddit',
-      author: 'GadgetEnthusiast',
-      authorHandle: 'u/GadgetEnthusiast',
-      content: '🚀 Just tested the new M4 MacBook Pro battery life — 18+ hours of real-world coding. Not Apple\'s synthetic benchmarks, actual work. Anyone else made the switch from the M2?',
-      timestamp: new Date(now - 1 * 60 * 60 * 1000).toISOString(),
-      url: 'https://reddit.com/r/apple',
-      likes: 4821,
-      comments: 312,
-      reposts: 0,
-      media: ['https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=600&q=80'],
-    },
-    {
-      id: 'demo_reddit_2',
-      platform: 'reddit',
-      author: 'devmindset',
-      authorHandle: 'u/devmindset',
-      content: 'Hot take: TypeScript strict mode should be enabled by default in every new project. The extra setup time pays for itself in the first week. Fight me.',
-      timestamp: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
-      url: 'https://reddit.com/r/programming',
-      likes: 2340,
-      comments: 189,
-      reposts: 0,
-    },
-    {
-      id: 'demo_reddit_3',
-      platform: 'reddit',
-      author: 'AIWatcherPro',
-      authorHandle: 'u/AIWatcherPro',
-      content: 'OpenAI just dropped o3-mini and the benchmarks are wild — passing PhD-level math problems at ~$1 per task. We\'re entering the era of "$1 expert consultants". Thread 🧵',
-      timestamp: new Date(now - 3 * 60 * 60 * 1000).toISOString(),
-      url: 'https://reddit.com/r/technology',
-      likes: 9102,
-      comments: 741,
-      reposts: 0,
-      media: ['https://images.unsplash.com/photo-1677442135703-1787eea5ce01?w=600&q=80'],
-    },
-    {
-      id: 'demo_x_1',
-      platform: 'x',
-      author: 'Product Hunt',
-      authorHandle: '@ProductHunt',
-      content: '🎉 Today\'s #1 product: SocialScraper — aggregate posts from all your social feeds, rephrase with AI, and cross-post in one tap. Built by indie devs, for indie devs.',
-      timestamp: new Date(now - 4 * 60 * 60 * 1000).toISOString(),
-      url: 'https://x.com/producthunt',
-      likes: 1203,
-      reposts: 341,
-      comments: 67,
-    },
-    {
-      id: 'demo_reddit_4',
-      platform: 'reddit',
-      author: 'SpaceNerd42',
-      authorHandle: 'u/SpaceNerd42',
-      content: 'Starship\'s 8th test flight successfully completed the full trajectory and ocean splashdown. Reusability target met. The economics of space access are about to change fundamentally.',
-      timestamp: new Date(now - 5 * 60 * 60 * 1000).toISOString(),
-      url: 'https://reddit.com/r/space',
-      likes: 31_500,
-      comments: 2840,
-      reposts: 0,
-      media: ['https://images.unsplash.com/photo-1516849841032-87cbac4d88f7?w=600&q=80'],
-    },
-    {
-      id: 'demo_instagram_1',
-      platform: 'instagram',
-      author: 'DesignInspiration',
-      authorHandle: '@designinspiration',
-      content: 'Clean UI, clean mind. ✨ This minimal dashboard redesign we shipped this week cut user onboarding time by 40%. Sometimes less really is more. #uxdesign #productdesign #ui',
-      timestamp: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
-      url: 'https://instagram.com/designinspiration',
-      likes: 8741,
-      comments: 213,
-      reposts: 0,
-      media: ['https://images.unsplash.com/photo-1467232004584-a241de8bcf5d?w=600&q=80'],
-    },
-  ];
 }
 
 // ─── Reddit (public RSS feed, no auth needed) ──────────────────────────────
@@ -270,26 +211,21 @@ async function fetchRedditPosts(accounts: string[], credentials?: PlatformCreden
 
   const posts: Post[] = [];
   const errors: string[] = [];
-  const sources = accounts.length > 0 ? accounts : ['programming'];
+  const sources = accounts.length > 0 ? accounts : [];
   let lastRssRequestAt = 0;
 
   for (const source of sources.slice(0, 5)) {
     try {
-      const trimmed = source.trim();
-      const isUser = trimmed.startsWith('u/');
-      // Strip leading r/ or u/ prefix so users can type either "unsloth" or "r/unsloth"
-      const slug = isUser
-        ? trimmed.replace(/^u\//, '').trim()
-        : trimmed.replace(/^r\//, '').trim();
-      const endpoint = isUser
-        ? `https://www.reddit.com/user/${encodeURIComponent(slug)}/.rss?limit=10`
-        : `https://www.reddit.com/r/${encodeURIComponent(slug)}/.rss?limit=10`;
+      const sourceInfo = normalizeRedditSource(source);
+      const endpoint = sourceInfo.isUser
+        ? `https://www.reddit.com/user/${encodeURIComponent(sourceInfo.slug)}/.rss?limit=10`
+        : `https://www.reddit.com/r/${encodeURIComponent(sourceInfo.slug)}/.rss?limit=10`;
 
       // Reddit applies burst limits to public RSS too. Space requests so a
       // list of followed sources does not look like an automated scrape.
       const elapsed = Date.now() - lastRssRequestAt;
-      if (lastRssRequestAt > 0 && elapsed < 1200) {
-        await waitMs(1200 - elapsed);
+      if (lastRssRequestAt > 0 && elapsed < 2500) {
+        await waitMs(2500 - elapsed);
       }
 
       let res: Response | null = null;
@@ -307,23 +243,23 @@ async function fetchRedditPosts(accounts: string[], credentials?: PlatformCreden
         const retryAfter = Number(res.headers.get('Retry-After'));
         const retryDelay = Number.isFinite(retryAfter) && retryAfter > 0
           ? Math.min(retryAfter * 1000, 8000)
-          : (attempt + 1) * 2500;
+          : (attempt + 1) * 4000;
         await waitMs(retryDelay);
       }
 
       if (!res) {
-        errors.push(`${isUser ? 'u/' : 'r/'}${slug}: request did not complete`);
+        errors.push(`${sourceInfo.label}: request did not complete`);
         continue;
       }
 
       if (!res.ok) {
         errors.push(
-          `${isUser ? 'u/' : 'r/'}${slug}: HTTP ${res.status}` +
+          `${sourceInfo.label}: HTTP ${res.status}` +
           (res.status === 429 ? ' (Reddit rate limit; try refresh again in a moment)' : ''),
         );
         continue;
       }
-      const feedPosts = parseRedditFeed(await res.text());
+      const feedPosts = parseRedditFeed(await res.text(), sourceInfo);
       posts.push(...feedPosts);
     } catch (err) {
       errors.push(`${source}: ${err instanceof Error ? err.message : 'failed'}`);
@@ -343,17 +279,13 @@ async function fetchRedditPostsOAuth(
   const token = await getRedditToken(credentials);
   const posts: Post[] = [];
   const errors: string[] = [];
-  const sources = accounts.length > 0 ? accounts : ['programming'];
+  const sources = accounts.length > 0 ? accounts : [];
 
   for (const source of sources.slice(0, 5)) {
-    const trimmed = source.trim();
-    const isUser = trimmed.startsWith('u/');
-    const slug = isUser
-      ? trimmed.replace(/^u\//, '').trim()
-      : trimmed.replace(/^r\//, '').trim();
-    const endpoint = isUser
-      ? `https://oauth.reddit.com/user/${slug}/submitted?limit=20&raw_json=1`
-      : `https://oauth.reddit.com/r/${slug}/hot?limit=20&raw_json=1`;
+    const sourceInfo = normalizeRedditSource(source);
+    const endpoint = sourceInfo.isUser
+      ? `https://oauth.reddit.com/user/${sourceInfo.slug}/submitted?limit=20&raw_json=1`
+      : `https://oauth.reddit.com/r/${sourceInfo.slug}/hot?limit=20&raw_json=1`;
 
     try {
       const res = await fetch(endpoint, {
@@ -363,7 +295,7 @@ async function fetchRedditPostsOAuth(
         },
       });
       if (!res.ok) {
-        errors.push(`${isUser ? 'u/' : 'r/'}${slug}: HTTP ${res.status}`);
+        errors.push(`${sourceInfo.label}: HTTP ${res.status}`);
         continue;
       }
 
@@ -384,6 +316,10 @@ async function fetchRedditPostsOAuth(
           comments: p.num_comments as number,
           reposts: 0,
           media: extractRedditMedia(p),
+          sourceKey: sourceInfo.key,
+          sourceLabel: sourceInfo.label,
+          sourceKind: sourceInfo.isUser ? 'user' : 'subreddit',
+          isOfficial: !sourceInfo.isUser && String(p.author).toLowerCase() === sourceInfo.slug.toLowerCase(),
         });
       }
     } catch (err) {
@@ -532,8 +468,9 @@ async function fetchLinkedInPosts(accounts: string[], credentials: PlatformCrede
       if (!match) continue;
       match.slice(0, 8).forEach((raw, i) => {
         const content = raw.replace(/^"text"\s*:\s*"/, '').replace(/"$/, '').replace(/\\n/g, '\n');
+          const stableContentId = content.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 72) || String(i);
         posts.push({
-          id: `linkedin_${username}_${i}_${Date.now()}`,
+            id: `linkedin_${username}_${stableContentId}`,
           platform: 'linkedin',
           author: username,
           authorHandle: account,
@@ -565,12 +502,14 @@ async function fetchFacebookPosts(accounts: string[], credentials: PlatformCrede
       contentMatch.slice(0, 6).forEach((raw, i) => {
         const textMatch = raw.match(/"text"\s*:\s*"([^"]+)"/);
         if (!textMatch) return;
+        const content = textMatch[1].replace(/\\n/g, '\n');
+        const stableContentId = content.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 72) || String(i);
         posts.push({
-          id: `facebook_${username}_${i}_${Date.now()}`,
+          id: `facebook_${username}_${stableContentId}`,
           platform: 'facebook',
           author: username,
           authorHandle: account,
-          content: textMatch[1].replace(/\\n/g, '\n'),
+          content,
           timestamp: new Date(Date.now() - i * 3600000).toISOString(),
           url: `https://www.facebook.com/${username}`,
         });
@@ -578,23 +517,6 @@ async function fetchFacebookPosts(accounts: string[], credentials: PlatformCrede
     } catch { /* skip */ }
   }
   return posts;
-}
-
-// ─── Mock posts fallback ──────────────────────────────────────────────────
-function getMockPosts(platform: PlatformId, accounts: string[]): Post[] {
-  const now = new Date();
-  return accounts.slice(0, 2).map((account, i) => ({
-    id: `${platform}_mock_${i}_${Date.now()}`,
-    platform,
-    author: account,
-    authorHandle: `@${account}`,
-    content: `Configure credentials for ${PLATFORMS[platform].name} in Settings to fetch real posts.`,
-    timestamp: new Date(now.getTime() - i * 3600000).toISOString(),
-    url: PLATFORMS[platform].webUrl ?? '',
-    likes: 0,
-    reposts: 0,
-    comments: 0,
-  }));
 }
 
 // ─── AI Rephrase ──────────────────────────────────────────────────────────
@@ -667,6 +589,7 @@ interface AppContextType {
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
   updatePlatformSettings: (platform: PlatformId, patch: Partial<AppSettings['platforms'][PlatformId]>) => Promise<void>;
   fetchPosts: () => Promise<void>;
+  postNow: (platform: PlatformId, content: string, redditTarget?: string) => Promise<PostResult>;
   startCompose: (post?: Post) => void;
   clearCompose: () => void;
   updateBaseContent: (content: string) => void;
@@ -720,13 +643,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 { ...defaults, ...(parsed.platforms?.[pid as PlatformId] ?? {}) },
               ])
             ) as AppSettings['platforms'];
+            const savedRedditSources = parsed.platforms?.reddit?.followedAccounts;
+            const migratedRedditSources =
+              Array.isArray(savedRedditSources) &&
+              savedRedditSources.length === 3 &&
+              ['programming', 'technology', 'worldnews'].every(source => savedRedditSources.includes(source))
+                ? []
+                : savedRedditSources;
+            if (parsed.platforms?.reddit && migratedRedditSources) {
+              mergedPlatforms.reddit = {
+                ...mergedPlatforms.reddit,
+                followedAccounts: migratedRedditSources,
+              };
+            }
             return { ...prev, ...parsed, platforms: mergedPlatforms };
           });
         }
         const postsRaw = await AsyncStorage.getItem(POSTS_KEY);
         if (postsRaw) {
           const saved: Post[] = JSON.parse(postsRaw);
-          if (saved.length > 0) setPosts(saved);
+          if (saved.length > 0) setPosts(saved.map(post => ({ ...post, isNew: false })));
         }
         const draftsRaw = await AsyncStorage.getItem(DRAFTS_KEY);
         if (draftsRaw) setDrafts(JSON.parse(draftsRaw));
@@ -762,6 +698,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const s = settingsRef.current;
     const allPosts: Post[] = [];
     const fetchErrors: string[] = [];
+    const addFetchedPosts = (items: Post[], platform: PlatformId) => {
+      allPosts.push(...items.map(post => post.sourceKey ? post : {
+        ...post,
+        sourceKey: `${platform}:account:${post.authorHandle || post.author}`,
+        sourceLabel: post.authorHandle || post.author,
+        sourceKind: 'account' as const,
+      }));
+    };
 
     try {
       for (const [pid, pSettings] of Object.entries(s.platforms)) {
@@ -778,14 +722,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               pSettings.followedAccounts,
               pSettings.useApi ? pSettings.credentials : undefined,
             );
-            allPosts.push(...p);
+            addFetchedPosts(p, platform);
           } catch (e) {
             fetchErrors.push(e instanceof Error ? e.message : String(e));
           }
         } else if (platform === 'x') {
           try {
             const p = await fetchXPosts(pSettings.followedAccounts, pSettings.credentials);
-            allPosts.push(...p);
+            addFetchedPosts(p, platform);
           } catch (e) {
             fetchErrors.push(e instanceof Error ? e.message : String(e));
           }
@@ -794,32 +738,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             try {
               const p = await fetchInstagramPosts(pSettings.followedAccounts, pSettings.credentials);
               if (p.length > 0) {
-                allPosts.push(...p);
-              } else if (pSettings.credentials.cookies) {
-                fetchErrors.push('Instagram: could not parse posts (cookies may be expired)');
+                addFetchedPosts(p, platform);
               } else {
-                allPosts.push(...getMockPosts(platform, pSettings.followedAccounts));
+                fetchErrors.push('Instagram: no posts returned. A valid session cookie may be required.');
               }
-            } catch {
-              allPosts.push(...getMockPosts(platform, pSettings.followedAccounts));
+            } catch (e) {
+              fetchErrors.push(`Instagram: ${e instanceof Error ? e.message : 'fetch failed'}`);
             }
           }
         } else if (platform === 'linkedin') {
           if (pSettings.followedAccounts.length > 0) {
             try {
               const p = await fetchLinkedInPosts(pSettings.followedAccounts, pSettings.credentials);
-              allPosts.push(...(p.length > 0 ? p : getMockPosts(platform, pSettings.followedAccounts)));
-            } catch {
-              allPosts.push(...getMockPosts(platform, pSettings.followedAccounts));
+              if (p.length > 0) addFetchedPosts(p, platform);
+              else fetchErrors.push('LinkedIn: no posts returned. A valid session cookie may be required.');
+            } catch (e) {
+              fetchErrors.push(`LinkedIn: ${e instanceof Error ? e.message : 'fetch failed'}`);
             }
           }
         } else if (platform === 'facebook') {
           if (pSettings.followedAccounts.length > 0) {
             try {
               const p = await fetchFacebookPosts(pSettings.followedAccounts, pSettings.credentials);
-              allPosts.push(...(p.length > 0 ? p : getMockPosts(platform, pSettings.followedAccounts)));
-            } catch {
-              allPosts.push(...getMockPosts(platform, pSettings.followedAccounts));
+              if (p.length > 0) addFetchedPosts(p, platform);
+              else fetchErrors.push('Facebook: no posts returned. A valid session cookie may be required.');
+            } catch (e) {
+              fetchErrors.push(`Facebook: ${e instanceof Error ? e.message : 'fetch failed'}`);
             }
           }
         }
@@ -832,14 +776,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           // Keep prior real posts on transient failure
           setLastFetchError(fetchErrors.join('\n') + '\n\n⚠️ Showing your last successful fetch.');
         } else {
-          setPosts([]);
-          await AsyncStorage.removeItem(POSTS_KEY);
+          if (postsRef.current.length === 0) {
+            setPosts([]);
+            await AsyncStorage.removeItem(POSTS_KEY);
+          } else {
+            const cleared = postsRef.current.map(post => ({ ...post, isNew: false }));
+            setPosts(cleared);
+            await AsyncStorage.setItem(POSTS_KEY, JSON.stringify(cleared));
+          }
           if (fetchErrors.length > 0) setLastFetchError(fetchErrors.join('\n'));
           else setLastFetchError('No posts returned. Configure platforms in Settings.');
         }
       } else {
-        setPosts(allPosts);
-        await AsyncStorage.setItem(POSTS_KEY, JSON.stringify(allPosts));
+        // Treat AsyncStorage as a local post database. Every successful fetch
+        // clears the previous "new" markers, then only unseen IDs are marked.
+        const previous = postsRef.current;
+        const knownIds = new Set(previous.map(post => post.id));
+        const merged = new Map<string, Post>(
+          previous.map(post => [post.id, { ...post, isNew: false }]),
+        );
+        const fetchedAt = new Date().toISOString();
+        const fetchBatchId = `fetch_${Date.now()}`;
+        for (const post of allPosts) {
+          merged.set(post.id, {
+            ...post,
+            isNew: !knownIds.has(post.id),
+            fetchedAt,
+            fetchBatchId,
+          });
+        }
+        const nextPosts = Array.from(merged.values()).sort(
+          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+        );
+        setPosts(nextPosts);
+        await AsyncStorage.setItem(POSTS_KEY, JSON.stringify(nextPosts));
         if (fetchErrors.length > 0) setLastFetchError(fetchErrors.join('\n'));
       }
     } catch (e: unknown) {
@@ -848,6 +818,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setIsFetchingPosts(false);
     }
   }, []);
+
+  const postNow = useCallback(async (
+    platform: PlatformId,
+    content: string,
+    redditTarget?: string,
+  ): Promise<PostResult> => {
+    const platformSettings = settingsRef.current.platforms[platform];
+    const poster = PLATFORM_POSTERS[platform];
+    if (!poster) return { ok: false, error: `${PLATFORMS[platform].name} API posting is not available.` };
+    if (!platformSettings?.postEnabled) {
+      return { ok: false, error: `Enable posting for ${PLATFORMS[platform].name} in Settings first.` };
+    }
+    if (!hasPostingCredentials(platform, platformSettings.credentials)) {
+      return { ok: false, error: `Add ${PLATFORMS[platform].name} API credentials in Settings first.` };
+    }
+    const extra = platform === 'reddit' && redditTarget ? { subreddit: redditTarget } : undefined;
+    return poster(content, platformSettings.credentials, extra);
+  }, []);
+
+  useEffect(() => {
+    const intervals: Record<AppSettings['fetchFrequency'], number | undefined> = {
+      manual: undefined,
+      '15min': 15 * 60 * 1000,
+      '30min': 30 * 60 * 1000,
+      '1h': 60 * 60 * 1000,
+      '6h': 6 * 60 * 60 * 1000,
+    };
+    const interval = intervals[settings.fetchFrequency];
+    if (!interval) return;
+    const timer = setInterval(() => {
+      void fetchPosts();
+    }, interval);
+    return () => clearInterval(timer);
+  }, [fetchPosts, settings.fetchFrequency]);
 
   const startCompose = useCallback((post?: Post) => {
     setComposedPost({
@@ -1023,7 +1027,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider value={{
       settings, posts, composedPost, isFetchingPosts, isRephrasing, lastFetchError,
-      updateSettings, updatePlatformSettings, fetchPosts,
+      updateSettings, updatePlatformSettings, fetchPosts, postNow,
       startCompose, clearCompose, updateBaseContent, updatePlatformDraft,
       toggleSelectedPlatform, setSelectedPlatforms,
       rephrasePost, applyRephrase, getEffectiveContent,
