@@ -1,1 +1,2 @@
 - [Reddit public fetching](reddit-public-fetch.md) — Direct JSON can return 403; public RSS works but needs paced requests to avoid burst 429s.
+- [Workflow bootstrap limits](workflow-bootstrap-limits.md) — Managed pnpm bootstrap can abort on Node thread/resource limits before Expo opens its port.
