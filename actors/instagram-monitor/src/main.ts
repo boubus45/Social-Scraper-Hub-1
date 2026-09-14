@@ -76,6 +76,41 @@ function collectNodes(value: unknown, output: Record<string, unknown>[] = []): R
   return output;
 }
 
+function unescapeJsonString(value: string): string {
+  try {
+    return JSON.parse(`"${value}"`) as string;
+  } catch {
+    return value.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+}
+
+function collectEmbedNodes(html: string): Record<string, unknown>[] {
+  const nodes: Record<string, unknown>[] = [];
+  const marker = /\\"shortcode_media\\":\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(html))) {
+    const segment = html.slice(match.index, match.index + 12000);
+    const readString = (key: string): string | undefined => {
+      const value = segment.match(new RegExp(`\\\\\"${key}\\\\\":\\\\\"((?:\\\\\\\\.|[^\"\\\\])*)`))?.[1];
+      return value ? unescapeJsonString(value) : undefined;
+    };
+    const id = readString("id");
+    const shortcode = readString("shortcode");
+    if (!id || !shortcode) continue;
+    const node: Record<string, unknown> = { id, shortcode };
+    const image = readString("display_url");
+    const video = readString("video_url");
+    if (image) node.display_url = image;
+    if (video) node.video_url = video;
+    const timestamp = segment.match(/\\\"taken_at_timestamp\\\":(\d+)/)?.[1];
+    if (timestamp) node.taken_at_timestamp = Number(timestamp);
+    const isVideo = segment.includes('\\"is_video\\":true');
+    if (isVideo) node.is_video = true;
+    nodes.push(node);
+  }
+  return nodes;
+}
+
 await Actor.init();
 
 const input = (await Actor.getInput<Input>()) ?? { accounts: [], monitorId: "missing" };
@@ -101,7 +136,15 @@ const crawler = new PlaywrightCrawler({
     const scripts = await page.locator("script").allTextContents();
     const payloads = readJsonScripts(scripts);
     const user = payloads.map(findUserPayload).find(Boolean);
-    const nodes = payloads.flatMap((payload) => collectNodes(payload));
+    let nodes = payloads.flatMap((payload) => collectNodes(payload));
+    if (nodes.length === 0) {
+      log.info(`Profile payload unavailable for ${username}; trying the public profile embed.`);
+      await page.goto(`https://www.instagram.com/${username}/embed/`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+      nodes = collectEmbedNodes(await page.content());
+    }
     const uniqueNodes = [...new Map(nodes.map((node) => [String(node.id), node])).values()];
     const selected = uniqueNodes.slice(0, maxPosts);
 
