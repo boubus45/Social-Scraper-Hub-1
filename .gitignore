@@ -49,6 +49,7 @@ Thumbs.db
 .local/
 .aider*
 memory.md
+artifacts/api-server/
 
 # Local backend secrets
 artifacts/api-server/.env
