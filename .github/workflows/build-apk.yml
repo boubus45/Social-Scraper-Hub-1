@@ -14,7 +14,6 @@ on:
       - 'pnpm-workspace.yaml'
       - 'tsconfig*.json'
       - 'eas.json'
-      - '.github/workflows/build-apk.yml'
   workflow_dispatch:
 
 jobs:
