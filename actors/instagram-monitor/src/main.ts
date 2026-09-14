@@ -77,15 +77,17 @@ function collectNodes(value: unknown, output: Record<string, unknown>[] = []): R
 }
 
 function unescapeJsonString(value: string): string {
+  let decoded = value;
   try {
-    return JSON.parse(`"${value}"`) as string;
+    decoded = JSON.parse(`"${value}"`) as string;
   } catch {
-    return value
-      .replace(/\\"/g, '"')
-      .replace(/\\\//g, "/")
-      .replace(/\\u([0-9a-fA-F]{4})/g, (_, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
-      .replace(/\\\\/g, "\\");
+    // Some embed payloads contain JavaScript-style escapes that are not valid JSON.
   }
+  return decoded
+    .replace(/\\"/g, '"')
+    .replace(/\\\//g, "/")
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
+    .replace(/\\\\/g, "\\");
 }
 
 function collectEmbedNodes(html: string): Record<string, unknown>[] {
