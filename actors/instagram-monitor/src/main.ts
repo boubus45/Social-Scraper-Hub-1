@@ -80,7 +80,11 @@ function unescapeJsonString(value: string): string {
   try {
     return JSON.parse(`"${value}"`) as string;
   } catch {
-    return value.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    return value
+      .replace(/\\"/g, '"')
+      .replace(/\\\//g, "/")
+      .replace(/\\u([0-9a-fA-F]{4})/g, (_, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
+      .replace(/\\\\/g, "\\");
   }
 }
 
