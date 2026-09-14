@@ -12,6 +12,7 @@ import {
 import { Alert } from 'react-native';
 import { PLATFORM_POSTERS, hasPostingCredentials, getRedditToken, PostResult } from '@/lib/platformPosters';
 import { PLATFORMS } from '@/constants/platforms';
+import { refreshInstagramMonitor, MONITOR_ID_KEY } from '@/lib/instagramMonitorApi';
 
 const STORAGE_KEY = '@socialscraper/settings';
 const POSTS_KEY = '@socialscraper/posts';
@@ -736,12 +737,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         } else if (platform === 'instagram') {
           if (pSettings.followedAccounts.length > 0) {
             try {
-              const p = await fetchInstagramPosts(pSettings.followedAccounts, pSettings.credentials);
-              if (p.length > 0) {
-                addFetchedPosts(p, platform);
-              } else {
-                fetchErrors.push('Instagram: no posts returned. A valid session cookie may be required.');
-              }
+              const monitorId = await AsyncStorage.getItem(MONITOR_ID_KEY);
+              const result = await refreshInstagramMonitor(pSettings.followedAccounts, monitorId ?? undefined);
+              addFetchedPosts(result.posts, platform);
             } catch (e) {
               fetchErrors.push(`Instagram: ${e instanceof Error ? e.message : 'fetch failed'}`);
             }

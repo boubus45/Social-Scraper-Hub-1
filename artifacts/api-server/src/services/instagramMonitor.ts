@@ -165,7 +165,9 @@ export function normalizeUsername(value: string): string {
   return value.trim().replace(/^@/, "").toLowerCase();
 }
 
-export async function startApifyRun(monitor: InstagramMonitor): Promise<{ id: string; status: string }> {
+export async function startApifyRun(
+  monitor: InstagramMonitor,
+): Promise<{ id: string; status: string; datasetId?: string }> {
   const token = process.env.APIFY_API_TOKEN;
   const actorId = process.env.APIFY_INSTAGRAM_ACTOR_ID;
   if (!token || !actorId) {
@@ -173,7 +175,7 @@ export async function startApifyRun(monitor: InstagramMonitor): Promise<{ id: st
   }
 
   const response = await fetch(
-    `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/runs?token=${encodeURIComponent(token)}`,
+    `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/runs?token=${encodeURIComponent(token)}&waitForFinish=120`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -189,8 +191,14 @@ export async function startApifyRun(monitor: InstagramMonitor): Promise<{ id: st
     throw new Error(`Apify run creation failed (${response.status}): ${await response.text()}`);
   }
 
-  const body = (await response.json()) as { data?: { id?: string; status?: string } };
+  const body = (await response.json()) as {
+    data?: { id?: string; status?: string; defaultDatasetId?: string };
+  };
   if (!body.data?.id) throw new Error("Apify returned no run ID.");
   setRunId(monitor.id, body.data.id);
-  return { id: body.data.id, status: body.data.status ?? "RUNNING" };
+  return {
+    id: body.data.id,
+    status: body.data.status ?? "RUNNING",
+    datasetId: body.data.defaultDatasetId,
+  };
 }

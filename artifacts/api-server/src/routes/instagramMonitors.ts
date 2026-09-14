@@ -44,7 +44,9 @@ router.post("/monitors/instagram/:id/run", async (req, res) => {
   const monitor = getMonitor(req.params.id);
   if (!monitor) return res.status(404).json({ error: "Monitor not found." });
   try {
-    return res.status(202).json({ run: await startApifyRun(monitor) });
+    const run = await startApifyRun(monitor);
+    const accepted = run.datasetId ? await ingestApifyRun(run.id, run.datasetId) : 0;
+    return res.status(202).json({ run, accepted, posts: getFeed(monitor.id) });
   } catch (error) {
     return res.status(502).json({ error: error instanceof Error ? error.message : "Unable to start Apify run." });
   }

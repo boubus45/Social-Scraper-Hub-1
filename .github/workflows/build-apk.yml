@@ -1,0 +1,74 @@
+name: Build Android APK (EAS)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Build APK via EAS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Enable corepack and install deps
+        run: |
+          corepack enable
+          pnpm install
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@>=3
+
+      - name: Login to Expo (token from secrets)
+        id: login
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then echo "EXPO_TOKEN secret is required"; exit 1; fi
+          eas login --token "$EXPO_TOKEN"
+          echo "logged_in=true" >> $GITHUB_OUTPUT
+
+      - name: Run EAS build (android) and download artifact
+        id: eas-build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+        run: |
+          if [ -z "$EXPO_PUBLIC_API_URL" ]; then
+            echo "EXPO_PUBLIC_API_URL secret is required (for example https://api.example.com)"
+            exit 1
+          fi
+          # Build with EAS in non-interactive mode and wait for completion
+          # Use the profile defined in eas.json (default: preview or production).
+          eas build --platform android --non-interactive --wait | tee eas-build-output.txt
+
+          # Try to extract an APK or AAB download URL from the output
+          APK_URL=$(grep -oE "https?://[^\"]+\.(apk|aab)" eas-build-output.txt | tail -n1 || true)
+          echo "apk_url=$APK_URL" >> $GITHUB_OUTPUT
+
+          if [ -n "$APK_URL" ]; then
+            echo "Downloading artifact from $APK_URL"
+            curl -L -o app.${APK_URL##*.} "$APK_URL"
+          else
+            echo "No direct APK/AAB URL found in EAS output. Open the build page from the workflow log to download the artifact."
+          fi
+
+      - name: Upload APK/AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-artifact
+          path: |
+            app.apk
+            app.aab
+
+      - name: Print build page link
+        if: always()
+        run: |
+          echo "If the artifact wasn't downloaded automatically, open the EAS build page from the workflow logs to download the APK/AAB."
+          echo "Ensure EXPO_TOKEN is set as a repository secret before running this workflow."
