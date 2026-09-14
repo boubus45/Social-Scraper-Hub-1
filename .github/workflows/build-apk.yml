@@ -1,6 +1,9 @@
 name: Build Android APK (EAS)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -38,12 +41,7 @@ jobs:
         id: eas-build
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
         run: |
-          if [ -z "$EXPO_PUBLIC_API_URL" ]; then
-            echo "EXPO_PUBLIC_API_URL secret is required (for example https://api.example.com)"
-            exit 1
-          fi
           # Build with EAS in non-interactive mode and wait for completion
           # Use the profile defined in eas.json (default: preview or production).
           eas build --platform android --non-interactive --wait | tee eas-build-output.txt
