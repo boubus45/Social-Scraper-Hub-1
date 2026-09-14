@@ -19,18 +19,7 @@ import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
 import PlatformBadge from '@/components/PlatformBadge';
 import { PLATFORM_LIST } from '@/constants/platforms';
-import {
-  AI_MODELS,
-  AI_PROVIDER_LABELS,
-  AIProvider,
-  FETCH_FREQUENCY_LABELS,
-  FetchFrequency,
-  PlatformCredentials,
-  PlatformId,
-} from '@/types';
-
-// Platforms that support toggling API vs manual mode
-const API_TOGGLE_PLATFORMS: PlatformId[] = ['x', 'reddit'];
+import { FETCH_FREQUENCY_LABELS, FetchFrequency, PlatformCredentials, PlatformId } from '@/types';
 
 function SectionHeader({ title, icon }: { title: string; icon: string }) {
   const colors = useColors();
@@ -47,12 +36,8 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { settings, updateSettings, updatePlatformSettings } = useApp();
   const [expandedPlatform, setExpandedPlatform] = useState<PlatformId | null>(null);
-  const [secureFields, setSecureFields] = useState<Record<string, boolean>>({});
 
   const topPad = Platform.OS === 'web' ? Math.max(insets.top, 67) : insets.top;
-
-  const toggleSecure = (key: string) =>
-    setSecureFields(prev => ({ ...prev, [key]: !prev[key] }));
 
   const handlePickAvatar = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -72,8 +57,6 @@ export default function SettingsScreen() {
     }
   };
 
-  const providers: AIProvider[] = ['openai', 'anthropic', 'gemini'];
-  const models = AI_MODELS[settings.ai.provider];
   const frequencies: FetchFrequency[] = ['manual', '15min', '30min', '1h', '6h'];
 
   return (
@@ -139,70 +122,11 @@ export default function SettingsScreen() {
         />
       </View>
 
-      {/* ── AI Model ── */}
-      <SectionHeader title="AI Model" icon="zap" />
+      {/* ── AI features ── */}
+      <SectionHeader title="AI Features" icon="zap" />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Provider</Text>
-        <View style={styles.chipRow}>
-          {providers.map(p => (
-            <TouchableOpacity
-              key={p}
-              onPress={() => updateSettings({ ai: { ...settings.ai, provider: p, model: AI_MODELS[p][0] } })}
-              style={[
-                styles.optionChip,
-                {
-                  backgroundColor: settings.ai.provider === p ? colors.primary : colors.secondary,
-                  borderColor: settings.ai.provider === p ? colors.primary : colors.border,
-                },
-              ]}
-            >
-              <Text style={[styles.optionChipText, { color: settings.ai.provider === p ? '#FFF' : colors.mutedForeground }]}>
-                {AI_PROVIDER_LABELS[p]}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={[styles.divider, { backgroundColor: colors.border }]} />
-        <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Model</Text>
-        <View style={styles.chipRow}>
-          {models.map(m => (
-            <TouchableOpacity
-              key={m}
-              onPress={() => updateSettings({ ai: { ...settings.ai, model: m } })}
-              style={[
-                styles.optionChip,
-                {
-                  backgroundColor: settings.ai.model === m ? colors.primary : colors.secondary,
-                  borderColor: settings.ai.model === m ? colors.primary : colors.border,
-                },
-              ]}
-            >
-              <Text style={[styles.optionChipText, { color: settings.ai.model === m ? '#FFF' : colors.mutedForeground }]}>
-                {m}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={[styles.divider, { backgroundColor: colors.border }]} />
-        <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>API Key</Text>
-        <View style={[styles.inputWrapper, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
-          <TextInput
-            style={[styles.textInput, { color: colors.foreground }]}
-            value={settings.ai.apiKey}
-            onChangeText={v => updateSettings({ ai: { ...settings.ai, apiKey: v } })}
-            placeholder="sk-..."
-            placeholderTextColor={colors.mutedForeground}
-            secureTextEntry={!secureFields['aiKey']}
-            autoCapitalize="none"
-          />
-          <TouchableOpacity onPress={() => toggleSecure('aiKey')} style={styles.eyeBtn}>
-            <Feather name={secureFields['aiKey'] ? 'eye' : 'eye-off'} size={16} color={colors.mutedForeground} />
-          </TouchableOpacity>
-        </View>
-        <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-          Used for AI rephrasing. Never sent to our servers.
+        <Text style={[styles.monitoringNote, { color: colors.mutedForeground }]}>
+          AI rewriting will be provided by Social Scraper Hub. No provider selection or API key is required.
         </Text>
       </View>
 
@@ -213,8 +137,6 @@ export default function SettingsScreen() {
           const pSettings = settings.platforms[platform.id];
           const isExpanded = expandedPlatform === platform.id;
           const isLast = idx === PLATFORM_LIST.length - 1;
-          const hasApiToggle = API_TOGGLE_PLATFORMS.includes(platform.id);
-          const credentialsLocked = hasApiToggle && !pSettings.useApi;
 
           return (
             <View key={platform.id}>
@@ -243,16 +165,6 @@ export default function SettingsScreen() {
                         ios_backgroundColor={colors.secondary}
                       />
                     </View>
-                    <View style={styles.toggleItem}>
-                      <Text style={[styles.toggleLabel, { color: colors.mutedForeground }]}>Post</Text>
-                      <Switch
-                        value={pSettings.postEnabled}
-                        onValueChange={v => updatePlatformSettings(platform.id, { postEnabled: v })}
-                        trackColor={{ false: colors.secondary, true: platform.bgColor }}
-                        thumbColor="#FFF"
-                        ios_backgroundColor={colors.secondary}
-                      />
-                    </View>
                   </View>
                 </View>
                 <Feather name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
@@ -262,74 +174,10 @@ export default function SettingsScreen() {
               {isExpanded && (
                 <View style={[styles.platformDetails, { borderBottomColor: isLast ? 'transparent' : colors.border }]}>
 
-                  {/* API / Manual toggle — only for X and Reddit */}
-                  {hasApiToggle && (
-                    <View style={[styles.dataSourceRow, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-                      <View style={styles.dataSourceInfo}>
-                        <Text style={[styles.dataSourceLabel, { color: colors.foreground }]}>Data Source</Text>
-                        <Text style={[styles.dataSourceSub, { color: colors.mutedForeground }]}>
-                          {pSettings.useApi
-                            ? 'Fetch & post via API (credentials required)'
-                            : 'Manual — copy-paste / open app'}
-                        </Text>
-                      </View>
-                      <View style={styles.dataSourceChips}>
-                        <TouchableOpacity
-                          onPress={() => updatePlatformSettings(platform.id, { useApi: true })}
-                          style={[
-                            styles.modeChip,
-                            {
-                              backgroundColor: pSettings.useApi ? colors.primary : colors.card,
-                              borderColor: pSettings.useApi ? colors.primary : colors.border,
-                            },
-                          ]}
-                        >
-                          <Feather name="zap" size={11} color={pSettings.useApi ? '#FFF' : colors.mutedForeground} />
-                          <Text style={[styles.modeChipText, { color: pSettings.useApi ? '#FFF' : colors.mutedForeground }]}>API</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => updatePlatformSettings(platform.id, { useApi: false })}
-                          style={[
-                            styles.modeChip,
-                            {
-                              backgroundColor: !pSettings.useApi ? colors.card : 'transparent',
-                              borderColor: !pSettings.useApi ? colors.border : colors.border,
-                            },
-                          ]}
-                        >
-                          <Feather name="copy" size={11} color={!pSettings.useApi ? colors.foreground : colors.mutedForeground} />
-                          <Text style={[styles.modeChipText, { color: !pSettings.useApi ? colors.foreground : colors.mutedForeground }]}>Manual</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  )}
-
-                  {/* Credentials — greyed & locked when manual mode selected */}
-                  <View style={[
-                    credentialsLocked ? styles.lockedSection : undefined,
-                    credentialsLocked ? { pointerEvents: 'none' as const } : undefined,
-                  ]}>
-                    {credentialsLocked && (
-                      <View style={[styles.lockedBadge, { backgroundColor: colors.muted, borderColor: colors.border }]}>
-                        <Feather name="lock" size={11} color={colors.mutedForeground} />
-                        <Text style={[styles.lockedText, { color: colors.mutedForeground }]}>
-                          API credentials not needed in manual mode
-                        </Text>
-                      </View>
-                    )}
-                    <PlatformCredentialFields
-                      platform={platform.id}
-                      credentials={pSettings.credentials}
-                      onUpdate={(creds: Partial<PlatformCredentials>) =>
-                        updatePlatformSettings(platform.id, { credentials: { ...pSettings.credentials, ...creds } })
-                      }
-                      secureFields={secureFields}
-                      toggleSecure={toggleSecure}
-                      colors={colors}
-                    />
-                  </View>
-
                   {/* Followed accounts */}
+                  <Text style={[styles.monitoringLabel, { color: colors.foreground }]}>
+                    Monitoring accounts
+                  </Text>
                   <Text style={[styles.inputLabel, { color: colors.mutedForeground, marginTop: 12 }]}>
                     {platform.id === 'reddit'
                       ? 'Subreddits / u/usernames — press ; or , to add'
@@ -342,16 +190,9 @@ export default function SettingsScreen() {
                     colors={colors}
                   />
 
-                  {/* No-API note for LinkedIn/FB/IG */}
-                  {!platform.hasApi && !hasApiToggle && (
-                    <View style={[styles.noApiNote, { backgroundColor: colors.warning + '15', borderColor: colors.warning + '40' }]}>
-                      <Feather name="info" size={12} color={colors.warning} />
-                      <Text style={[styles.noApiText, { color: colors.warning }]}>
-                        {platform.name} doesn't offer a public posting API. Posting will be manual.
-                        Fetching uses HTTP with session cookies if provided.
-                      </Text>
-                    </View>
-                  )}
+                  <Text style={[styles.monitoringHint, { color: colors.mutedForeground }]}>
+                    New posts will be collected by the Social Scraper Hub monitor.
+                  </Text>
                 </View>
               )}
             </View>
@@ -634,6 +475,9 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 4,
   },
+  monitoringNote: { fontSize: 13, lineHeight: 19 },
+  monitoringLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  monitoringHint: { fontSize: 12, lineHeight: 17 },
 
   // Data source toggle
   dataSourceRow: {

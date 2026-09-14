@@ -1,0 +1,32 @@
+{
+  "title": "Instagram Monitor Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "accounts": {
+      "title": "Instagram accounts",
+      "type": "array",
+      "description": "Public Instagram usernames without the @ prefix.",
+      "editor": "stringList",
+      "items": { "type": "string" }
+    },
+    "maxPostsPerAccount": {
+      "title": "Maximum new posts per account",
+      "type": "integer",
+      "default": 2,
+      "minimum": 1,
+      "maximum": 20
+    },
+    "onlyNew": {
+      "title": "Return only new posts",
+      "type": "boolean",
+      "default": true
+    },
+    "monitorId": {
+      "title": "Monitor identifier",
+      "type": "string",
+      "description": "Opaque identifier supplied by the Social Scraper backend."
+    }
+  },
+  "required": ["accounts", "monitorId"]
+}

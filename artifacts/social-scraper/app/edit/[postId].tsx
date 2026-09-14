@@ -54,7 +54,7 @@ export default function EditScreen() {
 
   const handleRephrase = async () => {
     if (!settings.ai.apiKey) {
-      Alert.alert('No AI Key', 'Configure your AI API key in Settings → AI Model first.');
+      Alert.alert('AI rewriting unavailable', 'AI rewriting will be provided by Social Scraper Hub and does not require a user API key.');
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

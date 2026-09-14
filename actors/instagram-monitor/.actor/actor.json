@@ -1,0 +1,11 @@
+{
+  "actorSpecification": 1,
+  "name": "social-scraper-instagram-monitor",
+  "title": "Social Scraper Instagram Monitor",
+  "description": "Collects newly visible public Instagram posts for configured usernames and returns normalized records.",
+  "version": "1.0",
+  "build": {
+    "dockerfile": "./Dockerfile"
+  },
+  "input": "./INPUT_SCHEMA.json"
+}
