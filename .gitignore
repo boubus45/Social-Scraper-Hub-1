@@ -47,3 +47,9 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+.aider*
+
+# Local backend secrets
+artifacts/api-server/.env
+artifacts/api-server/.env.*
+!artifacts/api-server/.env.example
