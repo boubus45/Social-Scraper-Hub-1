@@ -77,15 +77,26 @@ export async function refreshInstagramMonitor(
     frequency: 'daily',
     enabled: true,
   };
-  const monitor = existingMonitorId
-    ? await request<MonitorResponse>(`/api/monitors/instagram/${encodeURIComponent(existingMonitorId)}`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      })
-    : await request<MonitorResponse>('/api/monitors/instagram', {
+  let monitor: MonitorResponse;
+  if (existingMonitorId) {
+    try {
+      monitor = await request<MonitorResponse>(
+        `/api/monitors/instagram/${encodeURIComponent(existingMonitorId)}`,
+        { method: 'PATCH', body: JSON.stringify(payload) },
+      );
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('(404)')) throw error;
+      monitor = await request<MonitorResponse>('/api/monitors/instagram', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+    }
+  } else {
+    monitor = await request<MonitorResponse>('/api/monitors/instagram', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
 
   await AsyncStorage.setItem(MONITOR_ID_KEY, monitor.monitor.id);
   const result = await request<{ posts: InstagramMonitorPost[] }>(
