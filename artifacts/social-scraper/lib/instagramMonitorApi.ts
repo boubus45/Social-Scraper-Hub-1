@@ -38,7 +38,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Backend request failed (${response.status})${body ? `: ${body}` : ''}`);
+    let detail = body;
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown };
+      if (typeof parsed.error === 'string') detail = parsed.error;
+    } catch {
+      // Keep non-JSON backend responses as-is.
+    }
+    throw new Error(`Backend request failed (${response.status})${detail ? `: ${detail}` : ''}`);
   }
   return response.json() as Promise<T>;
 }

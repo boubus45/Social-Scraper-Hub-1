@@ -175,7 +175,7 @@ export async function startApifyRun(
   }
 
   const response = await fetch(
-    `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/runs?token=${encodeURIComponent(token)}&waitForFinish=120`,
+    `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/runs?token=${encodeURIComponent(token)}&waitForFinish=60`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -188,13 +188,19 @@ export async function startApifyRun(
     },
   );
   if (!response.ok) {
-    throw new Error(`Apify run creation failed (${response.status}): ${await response.text()}`);
+    const detail = (await response.text()).trim();
+    throw new Error(
+      `Apify run creation failed (${response.status})${detail ? `: ${detail}` : "."}`,
+    );
   }
 
   const body = (await response.json()) as {
     data?: { id?: string; status?: string; defaultDatasetId?: string };
   };
   if (!body.data?.id) throw new Error("Apify returned no run ID.");
+  if (["FAILED", "ABORTED", "TIMED-OUT"].includes(body.data.status ?? "")) {
+    throw new Error(`Apify run ended with status ${body.data.status}.`);
+  }
   setRunId(monitor.id, body.data.id);
   return {
     id: body.data.id,

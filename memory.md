@@ -141,32 +141,6 @@ vite.config.ts
 ```
 **Purpose:** Testing and developing UI components in isolation
 
-#### `/artifacts/demo-video` - Demo Video Generator
-**Purpose:** Vite + React app for generating demo/promo video
-**Structure:**
-```
-src/
-  ├── components/video/
-  │   ├── VideoTemplate.tsx
-  │   ├── video_scenes/
-  │   │   ├── Scene1FeedEmpty.tsx
-  │   │   ├── Scene2Settings.tsx
-  │   │   ├── Scene3FeedLoaded.tsx
-  │   │   ├── Scene4Compose.tsx
-  │   │   ├── Scene5AIRephrase.tsx
-  │   │   ├── Scene6Success.tsx
-  │   │   └── Scene7Outro.tsx
-  ├── lib/video/
-  │   ├── animations.ts
-  │   ├── hooks.ts
-  │   └── index.ts
-  ├── App.tsx, main.tsx
-vite.config.ts
-```
-**Purpose:** Automated video generation for demos (7 scenes)
-
----
-
 ### `/scripts` - Utility Scripts
 ```
 src/
@@ -317,7 +291,7 @@ pnpm codegen                # Generate API types/client
 
 ---
 
-**Last Updated:** 2026-08-21
+**Last Updated:** 2026-09-15
 
 ## Current Instagram monitor integration
 

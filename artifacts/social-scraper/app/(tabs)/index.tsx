@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -34,6 +35,8 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const { posts, isFetchingPosts, fetchPosts, lastFetchError, startCompose, settings } = useApp();
   const [activeFilter, setActiveFilter] = useState<FilterId>('all');
+  const [errorExpanded, setErrorExpanded] = useState(false);
+  const [errorCopied, setErrorCopied] = useState(false);
 
   const enabledPlatforms = PLATFORM_LIST.filter(p => settings.platforms[p.id].fetchEnabled);
   const filtered = activeFilter === 'all' ? posts : posts.filter(p => p.platform === activeFilter);
@@ -70,6 +73,13 @@ export default function FeedScreen() {
   const handleRefresh = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     fetchPosts();
+  };
+
+  const copyError = async () => {
+    if (!lastFetchError) return;
+    await Clipboard.setStringAsync(lastFetchError);
+    setErrorCopied(true);
+    setTimeout(() => setErrorCopied(false), 2000);
   };
 
   const topPad = Platform.OS === 'web' ? Math.max(insets.top, 67) : insets.top;
@@ -162,7 +172,24 @@ export default function FeedScreen() {
       {lastFetchError && (
         <View style={[styles.errorBanner, { backgroundColor: colors.destructive + '20', borderColor: colors.destructive + '40' }]}>
           <Feather name="alert-circle" size={14} color={colors.destructive} />
-          <Text style={[styles.errorText, { color: colors.destructive }]} numberOfLines={3}>{lastFetchError}</Text>
+          <TouchableOpacity
+            style={styles.errorBody}
+            onPress={() => setErrorExpanded(value => !value)}
+            activeOpacity={0.7}
+          >
+            <Text
+              style={[styles.errorText, { color: colors.destructive }]}
+              numberOfLines={errorExpanded ? undefined : 3}
+            >
+              {lastFetchError}
+            </Text>
+            <Text style={[styles.errorHint, { color: colors.destructive }]}>
+              {errorExpanded ? 'Tap to collapse' : 'Tap to view full error'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={copyError} accessibilityLabel="Copy error" hitSlop={8}>
+            <Feather name={errorCopied ? 'check' : 'copy'} size={16} color={colors.destructive} />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -264,6 +291,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   errorText: { flex: 1, fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
+  errorBody: { flex: 1, gap: 4 },
+  errorHint: { fontSize: 10, fontFamily: 'Inter_600SemiBold' },
   listContent: { padding: 16 },
   platformSectionHeader: {
     flexDirection: 'row',
