@@ -8,11 +8,19 @@
   },
   "postCreateCommand": "pnpm install",
   "forwardPorts": [
+    3000,
     8081,
     19000,
     19001,
     19002
   ],
+  "portsAttributes": {
+    "3000": {
+      "label": "Social Scraper API",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    }
+  },
   "customizations": {
     "vscode": {
       "extensions": [

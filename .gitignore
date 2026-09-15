@@ -52,6 +52,10 @@ memory.md
 artifacts/api-server/
 
 # Local backend secrets
+.env
 artifacts/api-server/.env
 artifacts/api-server/.env.*
 !artifacts/api-server/.env.example
+
+# Local Actor runtime storage
+actors/instagram-monitor/storage/

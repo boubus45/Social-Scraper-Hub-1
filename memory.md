@@ -325,7 +325,7 @@ pnpm codegen                # Generate API types/client
 - `artifacts/api-server/src/services/instagramMonitor.ts` enforces Free/Pro/Mega account, frequency, and post limits, starts the configured Actor, and ingests its dataset. Current monitor/feed storage is in-memory and is lost when the backend restarts.
 - `artifacts/api-server/src/routes/instagramMonitors.ts` exposes monitor CRUD, manual run, feed, and webhook endpoints under `/api`.
 - `artifacts/api-server/src/index.ts` loads backend environment variables with `dotenv`.
-- Backend secrets belong in the gitignored file `artifacts/api-server/.env`, based on `artifacts/api-server/.env.example`:
+- Backend secrets belong in the gitignored file `artifacts/api-server/.env`:
   - `PORT`
   - `APIFY_API_TOKEN`
   - `APIFY_INSTAGRAM_ACTOR_ID`
