@@ -295,7 +295,7 @@ pnpm codegen                # Generate API types/client
 
 ## Current Instagram monitor integration
 
-- `actors/instagram-monitor/` contains the deployed Apify Instagram Actor. It first parses the public profile page and falls back to the public `/embed/` page when Instagram returns a login/challenge page.
+- `actors/instagram-monitor/` contains the deployed Apify Instagram Actor (build 1.0.8). It parses captions and image/video media, including carousel children, from the public profile page and falls back to the public `/embed/` page when Instagram returns a login/challenge page.
 - `artifacts/api-server/src/services/instagramMonitor.ts` enforces Free/Pro/Mega account, frequency, and post limits, starts the configured Actor, and ingests its dataset. Current monitor/feed storage is in-memory and is lost when the backend restarts.
 - `artifacts/api-server/src/routes/instagramMonitors.ts` exposes monitor CRUD, manual run, feed, and webhook endpoints under `/api`.
 - `artifacts/api-server/src/index.ts` loads backend environment variables with `dotenv`.
@@ -304,7 +304,8 @@ pnpm codegen                # Generate API types/client
   - `APIFY_API_TOKEN`
   - `APIFY_INSTAGRAM_ACTOR_ID`
 - Never place the Apify token in the mobile app, APK, GitHub source, or user settings.
-- `artifacts/social-scraper/lib/instagramMonitorApi.ts` calls the backend to create/update a Free Instagram monitor and trigger a synchronous Apify run from the mobile refresh flow. It maps normalized Actor records to the app `Post` shape and stores the monitor ID in AsyncStorage.
+- `artifacts/social-scraper/lib/instagramMonitorApi.ts` calls the backend to create/update a Free Instagram monitor and trigger a synchronous Apify run from the mobile refresh flow. It maps normalized Actor records, including typed media items, to the app `Post` shape and retries once when a stale monitor/run ID returns 404.
+- `artifacts/social-scraper/components/PostCard.tsx` renders Instagram captions, images, videos, post detail/image modals, and a See in app deep link.
 - `artifacts/social-scraper/context/AppContext.tsx` routes Instagram refreshes through `refreshInstagramMonitor`; other legacy platform fetch paths remain separate.
 - The mobile backend URL is compiled from `EXPO_PUBLIC_API_URL` when supplied, otherwise defaults to `https://shiny-memory-7499jrvjj652xprv-3000.app.github.dev/api`. The helper removes a trailing `/api` before appending API paths.
 - `.github/workflows/build-apk.yml` builds the APK on demand and on `main` pushes only when mobile/build-related paths change. Backend-only changes do not trigger an APK build.

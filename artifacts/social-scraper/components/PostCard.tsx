@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Image,
+  Linking,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
@@ -13,8 +23,7 @@ function formatRelativeTime(isoString: string): string {
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d`;
+  return `${Math.floor(hrs / 24)}d`;
 }
 
 function formatCount(n?: number): string {
@@ -29,255 +38,162 @@ interface Props {
   onCompose: () => void;
 }
 
-export default function PostCard({ post, onCompose }: Props) {
-  const colors = useColors();
-  const [expanded, setExpanded] = useState(false);
-
-  const handleToggle = () => {
-    Haptics.selectionAsync();
-    setExpanded(prev => !prev);
-  };
-
-  const handleCompose = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onCompose();
-  };
-
-  const PREVIEW_LENGTH = 180;
-  const needsTruncation = post.content.length > PREVIEW_LENGTH;
-  const displayContent = expanded || !needsTruncation
-    ? post.content
-    : post.content.slice(0, PREVIEW_LENGTH) + '…';
-  const media = post.media?.filter(Boolean) ?? [];
-
-  return (
-    <View style={[
-      styles.card,
-      {
-        backgroundColor: colors.card,
-        borderColor: post.isOfficial ? colors.warning : post.isNew ? colors.primary : colors.border,
-        borderLeftWidth: post.isOfficial || post.isNew ? 3 : 1,
-      },
-    ]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.authorRow}>
-          <View style={[styles.avatar, { backgroundColor: colors.secondary }]}>
-            <Text style={[styles.avatarText, { color: colors.mutedForeground }]}>
-              {post.authorHandle?.[0]?.toUpperCase() ?? '?'}
-            </Text>
-          </View>
-          <View style={styles.authorInfo}>
-            <Text style={[styles.author, { color: colors.foreground }]} numberOfLines={1}>
-              {post.author}
-            </Text>
-            <Text style={[styles.handle, { color: colors.mutedForeground }]} numberOfLines={1}>
-              {post.authorHandle} · {formatRelativeTime(post.timestamp)}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.badges}>
-          {post.isNew && (
-            <View style={[styles.newBadge, { backgroundColor: colors.primary }]}>
-              <Feather name="star" size={10} color="#FFF" />
-              <Text style={styles.newBadgeText}>NEW</Text>
-            </View>
-          )}
-          {post.isOfficial && (
-            <View style={[styles.officialBadge, { backgroundColor: colors.warning + '20', borderColor: colors.warning + '60' }]}>
-              <Feather name="check-circle" size={10} color={colors.warning} />
-              <Text style={[styles.officialBadgeText, { color: colors.warning }]}>SOURCE</Text>
-            </View>
-          )}
-          <PlatformBadge platform={post.platform} size="sm" />
-        </View>
-      </View>
-
-      {/* Content */}
-      <TouchableOpacity onPress={needsTruncation ? handleToggle : undefined} activeOpacity={needsTruncation ? 0.8 : 1}>
-        <Text style={[styles.content, { color: colors.foreground }]}>
-          {displayContent || 'Instagram post'}
-        </Text>
-        {needsTruncation && (
-          <View style={styles.expandRow}>
-            <Text style={[styles.expandText, { color: colors.primary }]}>
-              {expanded ? 'Show less' : 'Read more'}
-            </Text>
-            <Feather name={expanded ? 'chevron-up' : 'chevron-down'} size={13} color={colors.primary} />
+function MediaItem({
+  item,
+  onImagePress,
+}: {
+  item: { type: 'image' | 'video'; url: string };
+  onImagePress: (url: string) => void;
+}) {
+  const [playing, setPlaying] = useState(false);
+  if (item.type === 'video') {
+    return (
+      <TouchableOpacity style={styles.mediaFrame} onPress={() => setPlaying(value => !value)} activeOpacity={0.9}>
+        <Video
+          source={{ uri: item.url }}
+          style={styles.media}
+          resizeMode={ResizeMode.COVER}
+          useNativeControls={playing}
+          shouldPlay={playing}
+          isLooping
+        />
+        {!playing && (
+          <View style={styles.playButton}>
+            <Feather name="play" size={24} color="#FFF" />
           </View>
         )}
       </TouchableOpacity>
+    );
+  }
+  return (
+    <TouchableOpacity style={styles.mediaFrame} onPress={() => onImagePress(item.url)} activeOpacity={0.9}>
+      <Image source={{ uri: item.url }} style={styles.media} resizeMode="cover" />
+    </TouchableOpacity>
+  );
+}
 
-      {media.length > 0 && (
+export default function PostCard({ post, onCompose }: Props) {
+  const colors = useColors();
+  const [detailVisible, setDetailVisible] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const media = post.mediaItems ?? (post.media ?? []).map(url => ({ type: 'image' as const, url }));
+
+  const openOriginal = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await Linking.openURL(post.url);
+  };
+
+  const renderPostContent = (full: boolean) => (
+    <Text style={[styles.content, { color: colors.foreground }]}>
+      {post.content || 'Instagram post'}
+      {!full && post.content.length > 180 ? '…' : ''}
+    </Text>
+  );
+
+  return (
+    <>
+      <View style={[styles.card, { backgroundColor: colors.card, borderColor: post.isOfficial ? colors.warning : post.isNew ? colors.primary : colors.border, borderLeftWidth: post.isOfficial || post.isNew ? 3 : 1 }]}>
+        <TouchableOpacity onPress={() => setDetailVisible(true)} activeOpacity={0.8}>
+          <View style={styles.header}>
+            <View style={styles.authorRow}>
+              <View style={[styles.avatar, { backgroundColor: colors.secondary }]}>
+                <Text style={[styles.avatarText, { color: colors.mutedForeground }]}>{post.authorHandle?.[0]?.toUpperCase() ?? '?'}</Text>
+              </View>
+              <View style={styles.authorInfo}>
+                <Text style={[styles.author, { color: colors.foreground }]} numberOfLines={1}>{post.author}</Text>
+                <Text style={[styles.handle, { color: colors.mutedForeground }]} numberOfLines={1}>{post.authorHandle} · {formatRelativeTime(post.timestamp)}</Text>
+              </View>
+            </View>
+            <View style={styles.badges}>
+              {post.isNew && <Text style={[styles.badgeText, { color: colors.primary }]}>NEW</Text>}
+              {post.isOfficial && <Text style={[styles.badgeText, { color: colors.warning }]}>SOURCE</Text>}
+              <PlatformBadge platform={post.platform} size="sm" />
+            </View>
+          </View>
+          {renderPostContent(false)}
+        </TouchableOpacity>
+
         <View style={styles.mediaGrid}>
-          {media.slice(0, 4).map((url, index) => (
-            <Image
-              key={`${url}-${index}`}
-              source={{ uri: url }}
-              style={styles.mediaImage}
-              resizeMode="cover"
-              accessibilityLabel={`Post media ${index + 1}`}
-            />
+          {media.slice(0, 4).map((item, index) => (
+            <MediaItem key={`${item.url}-${index}`} item={item} onImagePress={setImageUrl} />
           ))}
         </View>
-      )}
 
-      {/* Footer */}
-      <View style={[styles.footer, { borderTopColor: colors.border }]}>
-        <View style={styles.statsRow}>
-          {post.likes !== undefined && (
-            <View style={styles.stat}>
-              <Feather name="heart" size={13} color={colors.mutedForeground} />
-              <Text style={[styles.statText, { color: colors.mutedForeground }]}>{formatCount(post.likes)}</Text>
-            </View>
-          )}
-          {post.reposts !== undefined && (
-            <View style={styles.stat}>
-              <Feather name="repeat" size={13} color={colors.mutedForeground} />
-              <Text style={[styles.statText, { color: colors.mutedForeground }]}>{formatCount(post.reposts)}</Text>
-            </View>
-          )}
-          {post.comments !== undefined && (
-            <View style={styles.stat}>
-              <Feather name="message-circle" size={13} color={colors.mutedForeground} />
-              <Text style={[styles.statText, { color: colors.mutedForeground }]}>{formatCount(post.comments)}</Text>
-            </View>
-          )}
+        <View style={[styles.footer, { borderTopColor: colors.border }]}>
+          <View style={styles.statsRow}>
+            {post.likes !== undefined && <Text style={[styles.statText, { color: colors.mutedForeground }]}>♥ {formatCount(post.likes)}</Text>}
+            {post.comments !== undefined && <Text style={[styles.statText, { color: colors.mutedForeground }]}>◯ {formatCount(post.comments)}</Text>}
+          </View>
+          <View style={styles.footerActions}>
+            <TouchableOpacity onPress={openOriginal} style={[styles.actionButton, { borderColor: colors.border }]}>
+              <Feather name="external-link" size={13} color={colors.mutedForeground} />
+              <Text style={[styles.actionText, { color: colors.mutedForeground }]}>See in app</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onCompose} style={[styles.composeBtn, { backgroundColor: colors.primary }]}>
+              <Feather name="edit-2" size={13} color="#FFF" />
+              <Text style={styles.composeBtnText}>Compose</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-
-        <TouchableOpacity
-          onPress={handleCompose}
-          activeOpacity={0.8}
-          style={[styles.composeBtn, { backgroundColor: colors.primary }]}
-        >
-          <Feather name="edit-2" size={13} color="#FFFFFF" />
-          <Text style={styles.composeBtnText}>Compose</Text>
-        </TouchableOpacity>
       </View>
-    </View>
+
+      <Modal visible={detailVisible} animationType="slide" transparent onRequestClose={() => setDetailVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.detailModal, { backgroundColor: colors.card }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.foreground }]}>{post.authorHandle}</Text>
+              <TouchableOpacity onPress={() => setDetailVisible(false)}><Feather name="x" size={24} color={colors.foreground} /></TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.detailContent}>
+              {renderPostContent(true)}
+              {media.map((item, index) => <MediaItem key={`detail-${item.url}-${index}`} item={item} onImagePress={setImageUrl} />)}
+            </ScrollView>
+            <TouchableOpacity onPress={openOriginal} style={[styles.openButton, { backgroundColor: colors.primary }]}>
+              <Feather name="external-link" size={15} color="#FFF" />
+              <Text style={styles.composeBtnText}>See in app</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={Boolean(imageUrl)} transparent animationType="fade" onRequestClose={() => setImageUrl(null)}>
+        <TouchableOpacity style={styles.imageModal} onPress={() => setImageUrl(null)} activeOpacity={1}>
+          {imageUrl && <Image source={{ uri: imageUrl }} style={styles.fullImage} resizeMode="contain" />}
+        </TouchableOpacity>
+      </Modal>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 16,
-    gap: 12,
-    marginBottom: 12,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  badges: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  newBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  newBadgeText: { color: '#FFF', fontSize: 9, fontFamily: 'Inter_700Bold' },
-  officialBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  officialBadgeText: { fontSize: 9, fontFamily: 'Inter_700Bold' },
-  authorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  card: { borderRadius: 16, borderWidth: 1, padding: 16, gap: 12, marginBottom: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  authorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   authorInfo: { flex: 1 },
-  author: {
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  handle: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-    marginTop: 1,
-  },
-  content: {
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    lineHeight: 21,
-  },
-  mediaGrid: {
-    gap: 8,
-  },
-  mediaImage: {
-    width: '100%',
-    aspectRatio: 1,
-    borderRadius: 10,
-    backgroundColor: '#252538',
-  },
-  expandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 6,
-  },
-  expandText: {
-    fontSize: 13,
-    fontFamily: 'Inter_500Medium',
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderTopWidth: 1,
-    paddingTop: 10,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 14,
-  },
-  stat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  statText: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-  },
-  composeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-  },
-  composeBtnText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  author: { fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  handle: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 1 },
+  badges: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  badgeText: { fontSize: 10, fontFamily: 'Inter_700Bold' },
+  content: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 21, marginTop: 10 },
+  mediaGrid: { gap: 8 },
+  mediaFrame: { width: '100%', aspectRatio: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: '#252538' },
+  media: { width: '100%', height: '100%' },
+  playButton: { position: 'absolute', alignSelf: 'center', top: '42%', width: 56, height: 56, borderRadius: 28, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center', paddingLeft: 4 },
+  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, paddingTop: 10, gap: 8 },
+  statsRow: { flexDirection: 'row', gap: 12 },
+  statText: { fontSize: 12, fontFamily: 'Inter_400Regular' },
+  footerActions: { flexDirection: 'row', gap: 6 },
+  actionButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 7, borderRadius: 18, borderWidth: 1 },
+  actionText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
+  composeBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 18 },
+  composeBtnText: { color: '#FFF', fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  modalBackdrop: { flex: 1, backgroundColor: '#000B', justifyContent: 'flex-end' },
+  detailModal: { maxHeight: '90%', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  modalTitle: { fontSize: 17, fontFamily: 'Inter_700Bold' },
+  detailContent: { gap: 12, paddingBottom: 12 },
+  openButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 20, paddingVertical: 11 },
+  imageModal: { flex: 1, backgroundColor: '#000E', alignItems: 'center', justifyContent: 'center' },
+  fullImage: { width: '100%', height: '80%' },
 });

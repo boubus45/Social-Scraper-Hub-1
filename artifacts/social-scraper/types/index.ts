@@ -92,6 +92,7 @@ export interface Post {
   comments?: number;
   /** Image / video URLs extracted from the original post */
   media?: string[];
+  mediaItems?: Array<{ type: 'image' | 'video'; url: string }>;
   /** Configured source that produced this post, e.g. r/unsloth or u/example */
   sourceKey?: string;
   sourceLabel?: string;

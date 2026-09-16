@@ -63,6 +63,13 @@ function collectMedia(node: Record<string, unknown>): Array<{ type: "image" | "v
   if (image) media.push({ type: "image", url: image });
   const video = typeof node.video_url === "string" ? node.video_url : undefined;
   if (video) media.push({ type: "video", url: video });
+  const children = (node.edge_sidecar_to_children as { edges?: Array<{ node?: Record<string, unknown> }> } | undefined)
+    ?.edges?.map(edge => edge.node).filter((child): child is Record<string, unknown> => Boolean(child)) ?? [];
+  for (const child of children) {
+    for (const childMedia of collectMedia(child)) {
+      if (!media.some(item => item.url === childMedia.url)) media.push(childMedia);
+    }
+  }
   return media;
 }
 
@@ -74,6 +81,14 @@ function collectNodes(value: unknown, output: Record<string, unknown>[] = []): R
   }
   for (const child of Object.values(object)) collectNodes(child, output);
   return output;
+}
+
+function nodeRichness(node: Record<string, unknown>): number {
+  let score = 0;
+  if (node.edge_media_to_caption || node.caption || node.caption_text) score += 4;
+  if (node.display_url || node.thumbnail_src || node.video_url) score += 2;
+  if (node.edge_sidecar_to_children) score += 1;
+  return score;
 }
 
 function unescapeJsonString(value: string): string {
@@ -106,8 +121,12 @@ function collectEmbedNodes(html: string): Record<string, unknown>[] {
     const node: Record<string, unknown> = { id, shortcode };
     const image = readString("display_url");
     const video = readString("video_url");
+    const caption = segment.match(
+      /\\\"edge_media_to_caption\\\":\{\\\"edges\\\":\[\{\\\"node\\\":\{\\\"text\\\":\\\"((?:\\\\\\\\.|[^"\\\\])*)/,
+    )?.[1];
     if (image) node.display_url = image;
     if (video) node.video_url = video;
+    if (caption) node.caption = unescapeJsonString(caption);
     const timestamp = segment.match(/\\\"taken_at_timestamp\\\":(\d+)/)?.[1];
     if (timestamp) node.taken_at_timestamp = Number(timestamp);
     const isVideo = segment.includes('\\"is_video\\":true');
@@ -151,7 +170,12 @@ const crawler = new PlaywrightCrawler({
       });
       nodes = collectEmbedNodes(await page.content());
     }
-    const uniqueNodes = [...new Map(nodes.map((node) => [String(node.id), node])).values()];
+    const uniqueNodes = [...nodes.reduce((byId, node) => {
+      const id = String(node.id);
+      const previous = byId.get(id);
+      if (!previous || nodeRichness(node) > nodeRichness(previous)) byId.set(id, node);
+      return byId;
+    }, new Map<string, Record<string, unknown>>()).values()];
     const selected = uniqueNodes.slice(0, maxPosts);
 
     for (const node of selected) {
@@ -159,7 +183,14 @@ const crawler = new PlaywrightCrawler({
       if (input.onlyNew !== false && seen.has(id)) continue;
       const shortcode = String(node.shortcode ?? node.code);
       const captionObject = node.edge_media_to_caption as { edges?: Array<{ node?: { text?: string } }> } | undefined;
-      const text = captionObject?.edges?.[0]?.node?.text ?? (typeof node.caption === "string" ? node.caption : "");
+      const captionText = typeof node.caption === "object" && node.caption !== null
+        ? (node.caption as { text?: string }).text
+        : undefined;
+      const text = captionObject?.edges?.[0]?.node?.text
+        ?? captionText
+        ?? (typeof node.caption === "string" ? node.caption : undefined)
+        ?? (typeof node.caption_text === "string" ? node.caption_text : "")
+        ?? (typeof node.accessibility_caption === "string" ? node.accessibility_caption : "");
       const publishedAt = typeof node.taken_at_timestamp === "number"
         ? new Date(node.taken_at_timestamp * 1000).toISOString()
         : undefined;

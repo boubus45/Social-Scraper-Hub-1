@@ -63,6 +63,7 @@ function toAppPost(record: InstagramMonitorPost): Post {
     likes: record.metrics.likes,
     comments: record.metrics.comments,
     media: record.post.media.map(item => item.url),
+    mediaItems: record.post.media,
     sourceKey: `instagram:account:${username}`,
     sourceLabel: `@${username}`,
     sourceKind: 'account',
@@ -72,6 +73,7 @@ function toAppPost(record: InstagramMonitorPost): Post {
 export async function refreshInstagramMonitor(
   accounts: string[],
   existingMonitorId?: string,
+  retrying = false,
 ): Promise<{ monitorId: string; posts: Post[] }> {
   const normalizedAccounts = [...new Set(accounts
     .map(account => account.trim().replace(/^@/, '').toLowerCase())
@@ -109,11 +111,19 @@ export async function refreshInstagramMonitor(
   }
 
   await AsyncStorage.setItem(MONITOR_ID_KEY, monitor.monitor.id);
-  const result = await request<{ posts: InstagramMonitorPost[] }>(
-    `/api/monitors/instagram/${encodeURIComponent(monitor.monitor.id)}/run`,
-    { method: 'POST', body: JSON.stringify({}) },
-  );
-  return { monitorId: monitor.monitor.id, posts: result.posts.map(toAppPost) };
+  try {
+    const result = await request<{ posts: InstagramMonitorPost[] }>(
+      `/api/monitors/instagram/${encodeURIComponent(monitor.monitor.id)}/run`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+    return { monitorId: monitor.monitor.id, posts: result.posts.map(toAppPost) };
+  } catch (error) {
+    if (!retrying && error instanceof Error && error.message.includes('(404)')) {
+      await AsyncStorage.removeItem(MONITOR_ID_KEY);
+      return refreshInstagramMonitor(normalizedAccounts, undefined, true);
+    }
+    throw error;
+  }
 }
 
 export { MONITOR_ID_KEY };
