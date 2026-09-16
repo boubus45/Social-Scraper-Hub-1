@@ -1,0 +1,23 @@
+{
+  "title": "Reddit monitor input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "sources": {
+      "title": "Reddit sources",
+      "type": "array",
+      "description": "Subreddits such as programming or r/programming, or users such as u/spez.",
+      "editor": "stringList",
+      "default": ["programming"],
+      "items": { "type": "string" }
+    },
+    "limit": {
+      "title": "Posts per source",
+      "type": "integer",
+      "default": 10,
+      "minimum": 1,
+      "maximum": 25
+    }
+  },
+  "required": ["sources"]
+}

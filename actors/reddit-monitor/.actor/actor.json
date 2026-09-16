@@ -1,0 +1,9 @@
+{
+  "actorSpecification": 1,
+  "name": "social-scraper-reddit-monitor",
+  "title": "Social Scraper Reddit Monitor",
+  "description": "Collects public Reddit subreddit or user posts as normalized Social Scraper records.",
+  "version": "1.0",
+  "build": { "dockerfile": "./Dockerfile" },
+  "input": "./INPUT_SCHEMA.json"
+}

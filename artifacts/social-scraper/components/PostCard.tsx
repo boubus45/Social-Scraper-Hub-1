@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Image,
   Linking,
@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
@@ -46,23 +47,35 @@ function MediaItem({
   onImagePress: (url: string) => void;
 }) {
   const [playing, setPlaying] = useState(false);
+  const videoRef = useRef<Video>(null);
   if (item.type === 'video') {
     return (
-      <TouchableOpacity style={styles.mediaFrame} onPress={() => setPlaying(value => !value)} activeOpacity={0.9}>
+      <View style={styles.mediaFrame}>
         <Video
+          ref={videoRef}
           source={{ uri: item.url }}
           style={styles.media}
-          resizeMode={ResizeMode.COVER}
-          useNativeControls={playing}
+          resizeMode={ResizeMode.CONTAIN}
+          useNativeControls
           shouldPlay={playing}
           isLooping
         />
         {!playing && (
-          <View style={styles.playButton}>
+          <TouchableOpacity style={styles.playButton} onPress={() => setPlaying(true)} accessibilityLabel="Play video">
             <Feather name="play" size={24} color="#FFF" />
-          </View>
+          </TouchableOpacity>
         )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.rotateButton}
+          onPress={async () => {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+            await videoRef.current?.presentFullscreenPlayer();
+          }}
+          accessibilityLabel="Open video fullscreen in landscape"
+        >
+          <Feather name="rotate-cw" size={18} color="#FFF" />
+        </TouchableOpacity>
+      </View>
     );
   }
   return (
@@ -76,6 +89,7 @@ export default function PostCard({ post, onCompose }: Props) {
   const colors = useColors();
   const [detailVisible, setDetailVisible] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [textExpanded, setTextExpanded] = useState(false);
   const media = post.mediaItems ?? (post.media ?? []).map(url => ({ type: 'image' as const, url }));
 
   const openOriginal = async () => {
@@ -83,12 +97,21 @@ export default function PostCard({ post, onCompose }: Props) {
     await Linking.openURL(post.url);
   };
 
-  const renderPostContent = (full: boolean) => (
-    <Text style={[styles.content, { color: colors.foreground }]}>
-      {post.content || 'Instagram post'}
-      {!full && post.content.length > 180 ? '…' : ''}
-    </Text>
-  );
+  const isLongPost = post.content.length > 180;
+  const renderPostContent = (full: boolean) => {
+    const expanded = full || textExpanded;
+    const content = expanded || !isLongPost ? post.content : `${post.content.slice(0, 180).trimEnd()}…`;
+    return (
+      <View>
+        <Text style={[styles.content, { color: colors.foreground }]}>{content || 'Instagram post'}</Text>
+        {!full && isLongPost && (
+          <Text style={[styles.expandHint, { color: colors.primary }]}>
+            {expanded ? '- Collapse' : '+ Expand'}
+          </Text>
+        )}
+      </View>
+    );
+  };
 
   return (
     <>
@@ -110,6 +133,8 @@ export default function PostCard({ post, onCompose }: Props) {
               <PlatformBadge platform={post.platform} size="sm" />
             </View>
           </View>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setTextExpanded(value => !value)} activeOpacity={0.8}>
           {renderPostContent(false)}
         </TouchableOpacity>
 
@@ -178,11 +203,13 @@ const styles = StyleSheet.create({
   handle: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 1 },
   badges: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   badgeText: { fontSize: 10, fontFamily: 'Inter_700Bold' },
-  content: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 21, marginTop: 10 },
+  content: { fontSize: 14, lineHeight: 21, marginTop: 10 },
+  expandHint: { fontSize: 12, fontFamily: 'Inter_600SemiBold', marginTop: 5 },
   mediaGrid: { gap: 8 },
   mediaFrame: { width: '100%', aspectRatio: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: '#252538' },
   media: { width: '100%', height: '100%' },
   playButton: { position: 'absolute', alignSelf: 'center', top: '42%', width: 56, height: 56, borderRadius: 28, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center', paddingLeft: 4 },
+  rotateButton: { position: 'absolute', right: 10, top: 10, width: 38, height: 38, borderRadius: 19, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, paddingTop: 10, gap: 8 },
   statsRow: { flexDirection: 'row', gap: 12 },
   statText: { fontSize: 12, fontFamily: 'Inter_400Regular' },

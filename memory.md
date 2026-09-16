@@ -126,6 +126,12 @@ src/
 - Pino HTTP logging with custom serializers
 - Modular route structure
 
+#### `/actors/reddit-monitor` - Reddit Apify Actor
+**Purpose:** Standalone Apify Actor for public subreddit and Reddit-user monitoring.
+- `src/main.ts` fetches Reddit JSON listings, skips stickied/NSFW/empty posts, and emits normalized text/image/video records.
+- `.actor/INPUT_SCHEMA.json` accepts `sources` (subreddit names or `u/<username>`) and an optional `limit` from 1 to 25.
+- `Dockerfile`, `package.json`, and `tsconfig.json` define the Actor runtime.
+
 #### `/artifacts/mockup-sandbox` - UI Component Sandbox
 **Purpose:** Vite + React app showcasing UI components
 **Structure:**
@@ -193,7 +199,7 @@ All platforms support:
 - `/artifacts/social-scraper/app/_layout.tsx` - App initialization, provider setup
 
 ### UI Components
-- `/artifacts/social-scraper/components/PostCard.tsx` - Feed post display
+- `/artifacts/social-scraper/components/PostCard.tsx` - Feed post display with collapsed long captions, image/video media, fullscreen image close controls, and landscape video fullscreen control
 - `/artifacts/social-scraper/components/PlatformPreviewCard.tsx` - Draft preview
 - `/artifacts/social-scraper/components/PlatformSelector.tsx` - Platform multi-select
 - `/artifacts/mockup-sandbox/src/components/ui/` - Reusable UI components
@@ -202,6 +208,7 @@ All platforms support:
 - `/lib/api-spec/orval.config.ts` - API spec codegen config
 - `/lib/api-zod/src/generated/api.ts` - Generated validation schemas
 - `/artifacts/api-server/src/routes/index.ts` - API endpoint definitions
+- `/actors/reddit-monitor/src/main.ts` - Reddit public JSON scraper and normalized Actor output
 
 ### Database
 - `/lib/db/src/schema/index.ts` - Database schema definitions (extend here)
