@@ -322,5 +322,5 @@ pnpm codegen                # Generate API types/client
 - `actors/social-monitor/` is the unified Apify Actor. Its `platform` input selects the concerned collector (`instagram` or `reddit`); future platforms should add a handler here instead of creating another Actor.
 - The backend uses one running API server for all platform monitors. Instagram remains available under `/api/monitors/instagram`; Reddit is integrated under `/api/monitors/reddit`.
 - `artifacts/api-server/src/services/redditMonitor.ts` and `routes/redditMonitors.ts` create in-memory Reddit monitors, start the unified Actor, ingest its dataset, and expose feed results.
-- Set `APIFY_SOCIAL_MONITOR_ACTOR_ID` in `artifacts/api-server/.env` to the deployed unified Actor ID. Instagram falls back to `APIFY_INSTAGRAM_ACTOR_ID` until the unified Actor is deployed.
+- The deployed unified Actor is `qQh6zsNsdbR2FHnLO` (`social-monitor`, build 1.0.3). `APIFY_SOCIAL_MONITOR_ACTOR_ID` is configured in the local backend `.env`; Instagram falls back to `APIFY_INSTAGRAM_ACTOR_ID` only if the unified variable is absent.
 - `artifacts/social-scraper/lib/redditMonitorApi.ts` and `AppContext.tsx` route Reddit refreshes through the backend, so the APK no longer fetches Reddit directly.
