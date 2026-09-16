@@ -1,0 +1,1 @@
+{"actorSpecification":1,"name":"social-monitor","title":"Social Scraper Unified Monitor","version":"1.0","build":{"dockerfile":"./Dockerfile"},"input":"./INPUT_SCHEMA.json"}

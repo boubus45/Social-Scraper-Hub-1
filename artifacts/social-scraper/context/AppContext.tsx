@@ -13,6 +13,7 @@ import { Alert } from 'react-native';
 import { PLATFORM_POSTERS, hasPostingCredentials, getRedditToken, PostResult } from '@/lib/platformPosters';
 import { PLATFORMS } from '@/constants/platforms';
 import { refreshInstagramMonitor, MONITOR_ID_KEY } from '@/lib/instagramMonitorApi';
+import { refreshRedditMonitor, REDDIT_MONITOR_ID_KEY } from '@/lib/redditMonitorApi';
 
 const STORAGE_KEY = '@socialscraper/settings';
 const POSTS_KEY = '@socialscraper/posts';
@@ -719,11 +720,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (platform === 'reddit') {
           try {
-            const p = await fetchRedditPosts(
-              pSettings.followedAccounts,
-              pSettings.useApi ? pSettings.credentials : undefined,
-            );
-            addFetchedPosts(p, platform);
+            const monitorId = await AsyncStorage.getItem(REDDIT_MONITOR_ID_KEY);
+            const result = await refreshRedditMonitor(pSettings.followedAccounts, monitorId ?? undefined);
+            addFetchedPosts(result.posts, platform);
           } catch (e) {
             fetchErrors.push(e instanceof Error ? e.message : String(e));
           }

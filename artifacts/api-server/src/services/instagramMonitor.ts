@@ -169,7 +169,7 @@ export async function startApifyRun(
   monitor: InstagramMonitor,
 ): Promise<{ id: string; status: string; datasetId?: string }> {
   const token = process.env.APIFY_API_TOKEN;
-  const actorId = process.env.APIFY_INSTAGRAM_ACTOR_ID;
+  const actorId = process.env.APIFY_SOCIAL_MONITOR_ACTOR_ID ?? process.env.APIFY_INSTAGRAM_ACTOR_ID;
   if (!token || !actorId) {
     throw new Error("APIFY_API_TOKEN and APIFY_INSTAGRAM_ACTOR_ID must be configured.");
   }
@@ -180,6 +180,7 @@ export async function startApifyRun(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        platform: "instagram",
         accounts: monitor.accounts,
         maxPostsPerAccount: monitor.maxPostsPerAccount,
         onlyNew: true,

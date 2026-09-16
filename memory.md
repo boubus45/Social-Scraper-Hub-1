@@ -298,7 +298,7 @@ pnpm codegen                # Generate API types/client
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-09-16
 
 ## Current Instagram monitor integration
 
@@ -316,3 +316,11 @@ pnpm codegen                # Generate API types/client
 - `artifacts/social-scraper/context/AppContext.tsx` routes Instagram refreshes through `refreshInstagramMonitor`; other legacy platform fetch paths remain separate.
 - The mobile backend URL is compiled from `EXPO_PUBLIC_API_URL` when supplied, otherwise defaults to `https://shiny-memory-7499jrvjj652xprv-3000.app.github.dev/api`. The helper removes a trailing `/api` before appending API paths.
 - `.github/workflows/build-apk.yml` builds the APK on demand and on `main` pushes only when mobile/build-related paths change. Backend-only changes do not trigger an APK build.
+
+## Unified social monitor integration
+
+- `actors/social-monitor/` is the unified Apify Actor. Its `platform` input selects the concerned collector (`instagram` or `reddit`); future platforms should add a handler here instead of creating another Actor.
+- The backend uses one running API server for all platform monitors. Instagram remains available under `/api/monitors/instagram`; Reddit is integrated under `/api/monitors/reddit`.
+- `artifacts/api-server/src/services/redditMonitor.ts` and `routes/redditMonitors.ts` create in-memory Reddit monitors, start the unified Actor, ingest its dataset, and expose feed results.
+- Set `APIFY_SOCIAL_MONITOR_ACTOR_ID` in `artifacts/api-server/.env` to the deployed unified Actor ID. Instagram falls back to `APIFY_INSTAGRAM_ACTOR_ID` until the unified Actor is deployed.
+- `artifacts/social-scraper/lib/redditMonitorApi.ts` and `AppContext.tsx` route Reddit refreshes through the backend, so the APK no longer fetches Reddit directly.
