@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
@@ -48,6 +48,7 @@ export default function PostCard({ post, onCompose }: Props) {
   const displayContent = expanded || !needsTruncation
     ? post.content
     : post.content.slice(0, PREVIEW_LENGTH) + '…';
+  const media = post.media?.filter(Boolean) ?? [];
 
   return (
     <View style={[
@@ -95,7 +96,7 @@ export default function PostCard({ post, onCompose }: Props) {
       {/* Content */}
       <TouchableOpacity onPress={needsTruncation ? handleToggle : undefined} activeOpacity={needsTruncation ? 0.8 : 1}>
         <Text style={[styles.content, { color: colors.foreground }]}>
-          {displayContent}
+          {displayContent || 'Instagram post'}
         </Text>
         {needsTruncation && (
           <View style={styles.expandRow}>
@@ -106,6 +107,20 @@ export default function PostCard({ post, onCompose }: Props) {
           </View>
         )}
       </TouchableOpacity>
+
+      {media.length > 0 && (
+        <View style={styles.mediaGrid}>
+          {media.slice(0, 4).map((url, index) => (
+            <Image
+              key={`${url}-${index}`}
+              source={{ uri: url }}
+              style={styles.mediaImage}
+              resizeMode="cover"
+              accessibilityLabel={`Post media ${index + 1}`}
+            />
+          ))}
+        </View>
+      )}
 
       {/* Footer */}
       <View style={[styles.footer, { borderTopColor: colors.border }]}>
@@ -212,6 +227,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
     lineHeight: 21,
+  },
+  mediaGrid: {
+    gap: 8,
+  },
+  mediaImage: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 10,
+    backgroundColor: '#252538',
   },
   expandRow: {
     flexDirection: 'row',
