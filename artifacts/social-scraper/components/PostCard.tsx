@@ -156,9 +156,12 @@ export default function PostCard({ post, onCompose }: Props) {
         </View>
       </Modal>
       <Modal visible={Boolean(imageUrl)} transparent animationType="fade" onRequestClose={() => setImageUrl(null)}>
-        <TouchableOpacity style={styles.imageModal} onPress={() => setImageUrl(null)} activeOpacity={1}>
+        <View style={styles.imageModal}>
+          <TouchableOpacity style={styles.closeImageButton} onPress={() => setImageUrl(null)} accessibilityLabel="Close fullscreen image">
+            <Feather name="x" size={24} color="#FFF" />
+          </TouchableOpacity>
           {imageUrl && <Image source={{ uri: imageUrl }} style={styles.fullImage} resizeMode="contain" />}
-        </TouchableOpacity>
+        </View>
       </Modal>
     </>
   );
@@ -195,5 +198,6 @@ const styles = StyleSheet.create({
   detailContent: { gap: 12, paddingBottom: 12 },
   openButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 20, paddingVertical: 11 },
   imageModal: { flex: 1, backgroundColor: '#000E', alignItems: 'center', justifyContent: 'center' },
+  closeImageButton: { position: 'absolute', top: 48, right: 20, zIndex: 1, width: 42, height: 42, borderRadius: 21, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center' },
   fullImage: { width: '100%', height: '80%' },
 });

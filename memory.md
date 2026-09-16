@@ -295,7 +295,7 @@ pnpm codegen                # Generate API types/client
 
 ## Current Instagram monitor integration
 
-- `actors/instagram-monitor/` contains the deployed Apify Instagram Actor (build 1.0.8). It parses captions and image/video media, including carousel children, from the public profile page and falls back to the public `/embed/` page when Instagram returns a login/challenge page.
+- `actors/instagram-monitor/` contains the deployed Apify Instagram Actor (build 1.0.12). It parses captions and image/video media, including carousel children and post-level video sources, from the public profile page and falls back to the public `/embed/` page when Instagram returns a login/challenge page.
 - `artifacts/api-server/src/services/instagramMonitor.ts` enforces Free/Pro/Mega account, frequency, and post limits, starts the configured Actor, and ingests its dataset. Current monitor/feed storage is in-memory and is lost when the backend restarts.
 - `artifacts/api-server/src/routes/instagramMonitors.ts` exposes monitor CRUD, manual run, feed, and webhook endpoints under `/api`.
 - `artifacts/api-server/src/index.ts` loads backend environment variables with `dotenv`.

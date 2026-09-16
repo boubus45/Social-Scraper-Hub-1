@@ -63,6 +63,9 @@ function collectMedia(node: Record<string, unknown>): Array<{ type: "image" | "v
   if (image) media.push({ type: "image", url: image });
   const video = typeof node.video_url === "string" ? node.video_url : undefined;
   if (video) media.push({ type: "video", url: video });
+  if (node.is_video === true && !video && typeof node.video_src === "string") {
+    media.push({ type: "video", url: node.video_src });
+  }
   const children = (node.edge_sidecar_to_children as { edges?: Array<{ node?: Record<string, unknown> }> } | undefined)
     ?.edges?.map(edge => edge.node).filter((child): child is Record<string, unknown> => Boolean(child)) ?? [];
   for (const child of children) {
@@ -121,11 +124,13 @@ function collectEmbedNodes(html: string): Record<string, unknown>[] {
     const node: Record<string, unknown> = { id, shortcode };
     const image = readString("display_url");
     const video = readString("video_url");
+    const videoSrc = segment.match(/https?:\\\\\/\\\\\/[^" ]+?\.mp4[^" ]*/)?.[0];
     const caption = segment.match(
       /\\\"edge_media_to_caption\\\":\{\\\"edges\\\":\[\{\\\"node\\\":\{\\\"text\\\":\\\"((?:\\\\\\\\.|[^"\\\\])*)/,
     )?.[1];
     if (image) node.display_url = image;
     if (video) node.video_url = video;
+    if (videoSrc) node.video_src = unescapeJsonString(videoSrc);
     if (caption) node.caption = unescapeJsonString(caption);
     const timestamp = segment.match(/\\\"taken_at_timestamp\\\":(\d+)/)?.[1];
     if (timestamp) node.taken_at_timestamp = Number(timestamp);
@@ -161,6 +166,7 @@ const crawler = new PlaywrightCrawler({
     const scripts = await page.locator("script").allTextContents();
     const payloads = readJsonScripts(scripts);
     const user = payloads.map(findUserPayload).find(Boolean);
+    let videoSources: string[] = [];
     let nodes = payloads.flatMap((payload) => collectNodes(payload));
     if (nodes.length === 0) {
       log.info(`Profile payload unavailable for ${username}; trying the public profile embed.`);
@@ -170,6 +176,14 @@ const crawler = new PlaywrightCrawler({
       });
       nodes = collectEmbedNodes(await page.content());
     }
+    videoSources = await page.locator("video").evaluateAll(elements =>
+      elements
+        .map(element => {
+          const video = element as HTMLVideoElement;
+          return video.currentSrc || video.getAttribute("src") || "";
+        })
+        .filter(Boolean),
+    );
     const uniqueNodes = [...nodes.reduce((byId, node) => {
       const id = String(node.id);
       const previous = byId.get(id);
@@ -178,10 +192,29 @@ const crawler = new PlaywrightCrawler({
     }, new Map<string, Record<string, unknown>>()).values()];
     const selected = uniqueNodes.slice(0, maxPosts);
 
-    for (const node of selected) {
+    for (const [index, node] of selected.entries()) {
       const id = String(node.id);
       if (input.onlyNew !== false && seen.has(id)) continue;
+      if (node.is_video === true && !node.video_url && videoSources[index]) {
+        node.video_src = videoSources[index];
+      }
       const shortcode = String(node.shortcode ?? node.code);
+      if (node.is_video === true && !node.video_url && !node.video_src) {
+        await page.goto(`https://www.instagram.com/p/${shortcode}/embed/`, {
+          waitUntil: "domcontentloaded",
+          timeout: 60000,
+        });
+        await sleep(1000);
+        const postVideoSources = await page.locator("video").evaluateAll(elements =>
+          elements
+            .map(element => {
+              const video = element as HTMLVideoElement;
+              return video.currentSrc || video.getAttribute("src") || "";
+            })
+            .filter(Boolean),
+        );
+        if (postVideoSources[0]) node.video_src = postVideoSources[0];
+      }
       const captionObject = node.edge_media_to_caption as { edges?: Array<{ node?: { text?: string } }> } | undefined;
       const captionText = typeof node.caption === "object" && node.caption !== null
         ? (node.caption as { text?: string }).text
