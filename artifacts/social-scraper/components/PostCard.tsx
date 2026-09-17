@@ -47,9 +47,15 @@ function MediaItem({
   onImagePress: (url: string) => void;
 }) {
   const [playing, setPlaying] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const videoRef = useRef<Video>(null);
+  const closeFullscreen = async () => {
+    setFullscreen(false);
+    await ScreenOrientation.unlockAsync();
+  };
   if (item.type === 'video') {
     return (
+      <>
       <View style={styles.mediaFrame}>
         <Video
           ref={videoRef}
@@ -65,17 +71,34 @@ function MediaItem({
             <Feather name="play" size={24} color="#FFF" />
           </TouchableOpacity>
         )}
-        <TouchableOpacity
-          style={styles.rotateButton}
-          onPress={async () => {
-            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-            await videoRef.current?.presentFullscreenPlayer();
-          }}
-          accessibilityLabel="Open video fullscreen in landscape"
-        >
-          <Feather name="rotate-cw" size={18} color="#FFF" />
+        <TouchableOpacity style={styles.fullscreenButton} onPress={async () => {
+          setFullscreen(true);
+          await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+        }} accessibilityLabel="Open video fullscreen">
+          <Feather name="maximize-2" size={18} color="#FFF" />
         </TouchableOpacity>
       </View>
+      <Modal visible={fullscreen} animationType="fade" onRequestClose={closeFullscreen}>
+        <View style={styles.videoFullscreen}>
+          <Video
+            source={{ uri: item.url }}
+            style={styles.fullscreenVideo}
+            resizeMode={ResizeMode.CONTAIN}
+            useNativeControls
+            shouldPlay
+            isLooping
+          />
+          <TouchableOpacity style={styles.closeVideoButton} onPress={closeFullscreen} accessibilityLabel="Close fullscreen video">
+            <Feather name="x" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.rotateFullscreenButton} onPress={async () => {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+          }} accessibilityLabel="Rotate video to portrait">
+            <Feather name="rotate-cw" size={19} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+      </Modal>
+      </>
     );
   }
   return (
@@ -209,7 +232,11 @@ const styles = StyleSheet.create({
   mediaFrame: { width: '100%', aspectRatio: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: '#252538' },
   media: { width: '100%', height: '100%' },
   playButton: { position: 'absolute', alignSelf: 'center', top: '42%', width: 56, height: 56, borderRadius: 28, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center', paddingLeft: 4 },
-  rotateButton: { position: 'absolute', right: 10, top: 10, width: 38, height: 38, borderRadius: 19, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center' },
+  fullscreenButton: { position: 'absolute', right: 10, bottom: 10, width: 38, height: 38, borderRadius: 19, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center' },
+  videoFullscreen: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
+  fullscreenVideo: { width: '100%', height: '100%' },
+  closeVideoButton: { position: 'absolute', top: 28, right: 18, width: 42, height: 42, borderRadius: 21, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center' },
+  rotateFullscreenButton: { position: 'absolute', right: 18, bottom: 34, width: 42, height: 42, borderRadius: 21, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, paddingTop: 10, gap: 8 },
   statsRow: { flexDirection: 'row', gap: 12 },
   statText: { fontSize: 12, fontFamily: 'Inter_400Regular' },

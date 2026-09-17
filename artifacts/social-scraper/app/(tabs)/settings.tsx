@@ -266,6 +266,10 @@ function TagInput({
   };
 
   const handleKeyPress = ({ nativeEvent }: { nativeEvent: { key: string } }) => {
+    if (nativeEvent.key === 'Enter' || nativeEvent.key === 'Return') {
+      commitCurrent(inputValue);
+      return;
+    }
     if (nativeEvent.key === 'Backspace' && inputValue === '' && tags.length > 0) {
       onChange(tags.slice(0, -1));
     }

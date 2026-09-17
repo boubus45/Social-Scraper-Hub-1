@@ -324,3 +324,5 @@ pnpm codegen                # Generate API types/client
 - `artifacts/api-server/src/services/redditMonitor.ts` and `routes/redditMonitors.ts` create in-memory Reddit monitors, start the unified Actor, ingest its dataset, and expose feed results.
 - The deployed unified Actor is `qQh6zsNsdbR2FHnLO` (`social-monitor`, build 1.0.3). `APIFY_SOCIAL_MONITOR_ACTOR_ID` is configured in the local backend `.env`; Instagram falls back to `APIFY_INSTAGRAM_ACTOR_ID` only if the unified variable is absent.
 - `artifacts/social-scraper/lib/redditMonitorApi.ts` and `AppContext.tsx` route Reddit refreshes through the backend, so the APK no longer fetches Reddit directly.
+- `PostCard.tsx` keeps the feed fullscreen button separate from native video controls; the rotate control is shown only inside the custom fullscreen player, and closing it restores the device orientation.
+- Settings `TagInput` commits a source/account when Enter or Return is pressed, in addition to comma/semicolon.
