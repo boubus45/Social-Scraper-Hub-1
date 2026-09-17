@@ -724,7 +724,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             const result = await refreshRedditMonitor(pSettings.followedAccounts, monitorId ?? undefined);
             addFetchedPosts(result.posts, platform);
           } catch (e) {
-            fetchErrors.push(e instanceof Error ? e.message : String(e));
+            fetchErrors.push(`Reddit: ${e instanceof Error ? e.message : String(e)}`);
           }
         } else if (platform === 'x') {
           try {
