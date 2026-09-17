@@ -68,7 +68,7 @@ function cleanAtomContent(value: string): string {
 }
 
 function atomText(block: string, tag: string): string {
-  const match = block.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  const match = block.match(new RegExp(`<${tag}\\b[^>]*>([\s\\S]*?)<\/${tag}>`, 'i'));
   return match?.[1] ?? '';
 }
 
@@ -89,16 +89,35 @@ async function runReddit(input: Input): Promise<void> {
       : `https://www.reddit.com/r/${encodeURIComponent(source.slug)}/.rss?limit=${limit}`;
     let response: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      response = await fetch(endpoint, {
-        headers: {
-          Accept: "application/atom+xml, application/xml, text/xml",
-          "User-Agent": "SocialScraperUnifiedMonitor/1.0",
-        },
-      });
-      if (response.status !== 429 || attempt === 2) break;
-      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 2000));
+      try {
+        response = await fetch(endpoint, {
+          headers: {
+            Accept: "application/atom+xml, application/xml, text/xml",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+        });
+      } catch (fetchError) {
+        console.error(`Reddit ${source.isUser ? `u/${source.slug}` : `r/${source.slug}`} fetch error: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+        if (attempt === 2) continue;
+        await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 2000));
+        continue;
+      }
+      if (response.status === 429 && attempt < 2) {
+        console.warn(`Reddit rate limited, retrying in ${(attempt + 1) * 2}s`);
+        await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 2000));
+        continue;
+      }
+      break;
     }
-    if (!response || !response.ok) continue;
+    if (!response) {
+      console.error(`Reddit ${source.isUser ? `u/${source.slug}` : `r/${source.slug}`}: no response after retries`);
+      continue;
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.error(`Reddit ${source.isUser ? `u/${source.slug}` : `r/${source.slug}`}: HTTP ${response.status} ${body.slice(0, 200)}`);
+      continue;
+    }
     const xml = await response.text();
     const entries = xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
     for (const entry of entries) {

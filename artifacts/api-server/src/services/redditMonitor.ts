@@ -95,9 +95,18 @@ export function getRedditFeed(id: string) {
 }
 
 export async function startRedditRun(monitor: RedditMonitor) {
+  const records = await fetchRedditDirectly(monitor);
+  if (records.length > 0) {
+    addRedditFeedRecords(monitor.id, records);
+    return { id: "local", status: "SUCCEEDED", datasetId: undefined };
+  }
+
   const token = process.env.APIFY_API_TOKEN;
   const actorId = process.env.APIFY_SOCIAL_MONITOR_ACTOR_ID;
-  if (!token || !actorId) throw new Error("APIFY_API_TOKEN and APIFY_SOCIAL_MONITOR_ACTOR_ID must be configured.");
+  if (!token || !actorId) {
+    throw new Error("No Reddit posts fetched. Reddit may be blocking this network.");
+  }
+
   const response = await fetch(
     `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/runs?token=${encodeURIComponent(token)}&waitForFinish=60`,
     {
@@ -123,4 +132,98 @@ export async function startRedditRun(monitor: RedditMonitor) {
     addRedditFeedRecords(monitor.id, (await dataset.json()) as RedditPostRecord[]);
   }
   return { id: body.data.id, status: body.data.status ?? "RUNNING", datasetId: body.data.defaultDatasetId };
+}
+
+async function fetchRedditDirectly(monitor: RedditMonitor): Promise<RedditPostRecord[]> {
+  const records: RedditPostRecord[] = [];
+  for (const rawSource of monitor.accounts.slice(0, 10)) {
+    const trimmed = rawSource.trim().replace(/^r\//i, "");
+    const isUser = trimmed.toLowerCase().startsWith("u/");
+    const slug = isUser ? trimmed.slice(2) : trimmed;
+    if (!/^[a-zA-Z0-9_]{1,50}$/.test(slug)) continue;
+
+    const endpoint = isUser
+      ? `https://www.reddit.com/user/${encodeURIComponent(slug)}/.rss?limit=${monitor.limit}`
+      : `https://www.reddit.com/r/${encodeURIComponent(slug)}/.rss?limit=${monitor.limit}`;
+
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        response = await fetch(endpoint, {
+          headers: {
+            Accept: "application/atom+xml, application/xml, text/xml",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          },
+        });
+      } catch { /* retry */ }
+      if (response && response.status === 429 && attempt < 2) {
+        await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
+        continue;
+      }
+      break;
+    }
+    if (!response?.ok) continue;
+
+    const xml = await response.text();
+    const entries = xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
+    for (const entry of entries) {
+      const title = cleanAtomContent(atomText(entry, "title"));
+      const description = cleanAtomContent(atomText(entry, "content"))
+        .replace(/\s+submitted by\s+\/u\/\S+[\s\S]*$/i, "")
+        .trim();
+      const text = description && !/^\[?(link|comments)\]?$/i.test(description) ? description : title;
+      const id = atomText(entry, "id").trim().replace(/^t3_/, "");
+      if (!text && !id) continue;
+      const authorName = cleanAtomContent(atomText(entry, "name")).replace(/^\/u\//i, "").trim() || "Reddit";
+      const postUrl = atomAttribute(entry, "link", "href");
+      const published = atomText(entry, "published").trim() || atomText(entry, "updated").trim();
+      records.push({
+        platform: "reddit",
+        account: {
+          username: slug,
+          displayName: isUser ? `u/${slug}` : `r/${slug}`,
+        },
+        post: {
+          id: id || `rss_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          url: postUrl || "https://www.reddit.com",
+          text,
+          publishedAt: published && !Number.isNaN(new Date(published).getTime()) ? new Date(published).toISOString() : undefined,
+          media: [
+            atomAttribute(entry, "media:content", "url"),
+            atomAttribute(entry, "media:thumbnail", "url"),
+            atomAttribute(entry, "enclosure", "url"),
+          ].filter(v => /^https?:\/\//i.test(v)).map(url => ({ type: "image" as const, url })),
+        },
+        metrics: { likes: 0, comments: 0, shares: 0, views: 0 },
+        monitorId: monitor.id,
+      });
+    }
+  }
+  return records;
+}
+
+function cleanAtomContent(value: string): string {
+  const decode = (v: string) => v
+    .replace(/&#x27;|&#39;|&apos;/gi, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, decimal: string) => String.fromCodePoint(Number(decimal)))
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"');
+  let decoded = value;
+  try { decoded = JSON.parse(`"${value}"`); } catch { /* keep */ }
+  return decode(decode(decoded));
+}
+
+function atomText(block: string, tag: string): string {
+  const match = block.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  return match?.[1] ?? '';
+}
+
+function atomAttribute(block: string, tag: string, attribute: string): string {
+  const element = block.match(new RegExp(`<${tag}\\b[^>]*>`, 'i'))?.[0] ?? '';
+  const match = element.match(new RegExp(`${attribute}\\s*=\\s*["']([^"']+)["']`, 'i'));
+  return match?.[1] ?? '';
 }
