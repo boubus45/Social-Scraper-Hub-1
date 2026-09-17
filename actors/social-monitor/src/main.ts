@@ -54,7 +54,7 @@ function redditMedia(post: Record<string, unknown>): Array<{ type: "image" | "vi
 
 async function runReddit(input: Input): Promise<void> {
   const limit = Math.min(Math.max(input.limit ?? 10, 1), 25);
-  const sources = [...new Set((input.sources ?? []).filter(source => typeof source === "string"))].slice(0, 10);
+  const sources = [...new Set((input.sources ?? input.accounts ?? []).filter(source => typeof source === "string"))].slice(0, 10);
   for (const rawSource of sources) {
     const source = normalizeRedditSource(rawSource);
     if (!/^[a-zA-Z0-9_]{1,50}$/.test(source.slug)) continue;

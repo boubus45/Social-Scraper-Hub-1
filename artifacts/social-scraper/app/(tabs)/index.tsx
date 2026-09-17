@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -8,6 +8,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ViewToken,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -36,6 +37,12 @@ export default function FeedScreen() {
   const { posts, isFetchingPosts, fetchPosts, lastFetchError, startCompose, settings } = useApp();
   const [activeFilter, setActiveFilter] = useState<FilterId>('all');
   const [errorCopied, setErrorCopied] = useState(false);
+  const visibleKeysRef = useRef(new Set<string>());
+
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const next = new Set(viewableItems.map(v => v.key as string));
+    visibleKeysRef.current = next;
+  }).current;
 
   const enabledPlatforms = PLATFORM_LIST.filter(p => settings.platforms[p.id].fetchEnabled);
   const filtered = activeFilter === 'all' ? posts : posts.filter(p => p.platform === activeFilter);
@@ -182,9 +189,11 @@ export default function FeedScreen() {
       <FlatList
         data={feedItems}
         keyExtractor={item => item.key}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
         renderItem={({ item }) => {
           if (item.kind === 'post') {
-            return <PostCard post={item.post} onCompose={() => handleCompose(item.post)} />;
+            return <PostCard post={item.post} onCompose={() => handleCompose(item.post)} visible={visibleKeysRef.current.has(item.key)} />;
           }
           if (item.kind === 'platform') {
             const def = PLATFORM_LIST.find(platform => platform.id === item.platform);

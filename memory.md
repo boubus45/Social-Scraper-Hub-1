@@ -199,7 +199,7 @@ All platforms support:
 - `/artifacts/social-scraper/app/_layout.tsx` - App initialization, provider setup
 
 ### UI Components
-- `/artifacts/social-scraper/components/PostCard.tsx` - Feed post display with collapsed long captions, image/video media, fullscreen image close controls, and landscape video fullscreen control
+- `/artifacts/social-scraper/components/PostCard.tsx` - Feed post display with collapsed long captions, image/video media, fullscreen image close controls, and landscape video fullscreen control. **Updates:** videos pause when scrolled out of view (via FlatList visibility tracking), opening fullscreen does NOT auto-rotate (only rotate button does), closing fullscreen pauses the feed video, clicking caption opens full post detail (not toggle expand), removed "Instagram post" default caption, video-only posts show only the video (no static image).
 - `/artifacts/social-scraper/components/PlatformPreviewCard.tsx` - Draft preview
 - `/artifacts/social-scraper/components/PlatformSelector.tsx` - Platform multi-select
 - `/artifacts/mockup-sandbox/src/components/ui/` - Reusable UI components
@@ -278,6 +278,8 @@ pnpm codegen                # Generate API types/client
 | Add new platform | `types/index.ts` (PlatformId), `constants/platforms.ts`, `lib/platformPosters.ts` |
 | Add API endpoint | `artifacts/api-server/src/routes/`, regenerate with `pnpm codegen` |
 | Modify UI screen | `artifacts/social-scraper/app/(tabs)/*.tsx` or `app/edit/[postId].tsx` |
+| Modify feed posts | `artifacts/social-scraper/components/PostCard.tsx` (videos, captions, fullscreen, media display) |
+| Change feed visibility | `artifacts/social-scraper/app/(tabs)/index.tsx` (FlatList `onViewableItemsChanged`) |
 | Change app theme | `constants/colors.ts`, `hooks/useColors.ts` |
 | Add database table | `lib/db/src/schema/index.ts` (use Drizzle), run `pnpm push` |
 | Update validation | `lib/api-zod/src/generated/api.ts` or regenerate |
@@ -298,7 +300,7 @@ pnpm codegen                # Generate API types/client
 
 ---
 
-**Last Updated:** 2026-09-16
+**Last Updated:** 2026-09-17
 
 ## Current Instagram monitor integration
 
@@ -319,7 +321,7 @@ pnpm codegen                # Generate API types/client
 
 ## Unified social monitor integration
 
-- `actors/social-monitor/` is the unified Apify Actor. Its `platform` input selects the concerned collector (`instagram` or `reddit`); future platforms should add a handler here instead of creating another Actor.
+- `actors/social-monitor/` is the unified Apify Actor. Its `platform` input selects the concerned collector (`instagram` or `reddit`); future platforms should add a handler here instead of creating another Actor. The Reddit handler reads from `sources` or `accounts` input field.
 - The backend uses one running API server for all platform monitors. Instagram remains available under `/api/monitors/instagram`; Reddit is integrated under `/api/monitors/reddit`.
 - `artifacts/api-server/src/services/redditMonitor.ts` and `routes/redditMonitors.ts` create in-memory Reddit monitors, start the unified Actor, ingest its dataset, and expose feed results.
 - The deployed unified Actor is `qQh6zsNsdbR2FHnLO` (`social-monitor`, build 1.0.3). `APIFY_SOCIAL_MONITOR_ACTOR_ID` is configured in the local backend `.env`; Instagram falls back to `APIFY_INSTAGRAM_ACTOR_ID` only if the unified variable is absent.

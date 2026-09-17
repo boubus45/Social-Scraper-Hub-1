@@ -37,22 +37,32 @@ function formatCount(n?: number): string {
 interface Props {
   post: Post;
   onCompose: () => void;
+  visible: boolean;
 }
 
 function MediaItem({
   item,
   onImagePress,
+  visible,
+  onFullscreenChange,
 }: {
   item: { type: 'image' | 'video'; url: string };
   onImagePress: (url: string) => void;
+  visible: boolean;
+  onFullscreenChange: (active: boolean) => void;
 }) {
   const [playing, setPlaying] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const videoRef = useRef<Video>(null);
+
   const closeFullscreen = async () => {
     setFullscreen(false);
+    onFullscreenChange(false);
     await ScreenOrientation.unlockAsync();
+    await videoRef.current?.stopAsync();
+    setPlaying(false);
   };
+
   if (item.type === 'video') {
     return (
       <>
@@ -63,8 +73,13 @@ function MediaItem({
           style={styles.media}
           resizeMode={ResizeMode.CONTAIN}
           useNativeControls
-          shouldPlay={playing}
+          shouldPlay={playing && visible}
           isLooping
+          onPlaybackStatusUpdate={(status) => {
+            if (status.isLoaded && !status.isPlaying && status.didJustFinish === false && playing) {
+              // video paused natively or buffering
+            }
+          }}
         />
         {!playing && (
           <TouchableOpacity style={styles.playButton} onPress={() => setPlaying(true)} accessibilityLabel="Play video">
@@ -73,7 +88,7 @@ function MediaItem({
         )}
         <TouchableOpacity style={styles.fullscreenButton} onPress={async () => {
           setFullscreen(true);
-          await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+          onFullscreenChange(true);
         }} accessibilityLabel="Open video fullscreen">
           <Feather name="maximize-2" size={18} color="#FFF" />
         </TouchableOpacity>
@@ -92,8 +107,8 @@ function MediaItem({
             <Feather name="x" size={24} color="#FFF" />
           </TouchableOpacity>
           <TouchableOpacity style={styles.rotateFullscreenButton} onPress={async () => {
-            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-          }} accessibilityLabel="Rotate video to portrait">
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+          }} accessibilityLabel="Rotate video to landscape">
             <Feather name="rotate-cw" size={19} color="#FFF" />
           </TouchableOpacity>
         </View>
@@ -108,12 +123,19 @@ function MediaItem({
   );
 }
 
-export default function PostCard({ post, onCompose }: Props) {
+export default function PostCard({ post, onCompose, visible }: Props) {
   const colors = useColors();
   const [detailVisible, setDetailVisible] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [textExpanded, setTextExpanded] = useState(false);
-  const media = post.mediaItems ?? (post.media ?? []).map(url => ({ type: 'image' as const, url }));
+  const [anyFullscreen, setAnyFullscreen] = useState(false);
+  const media = (() => {
+    const items = post.mediaItems ?? (post.media ?? []).map(url => ({ type: 'image' as const, url }));
+    if (items.some(item => item.type === 'video')) {
+      return items.filter(item => item.type === 'video');
+    }
+    return items;
+  })();
 
   const openOriginal = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -126,7 +148,9 @@ export default function PostCard({ post, onCompose }: Props) {
     const content = expanded || !isLongPost ? post.content : `${post.content.slice(0, 180).trimEnd()}…`;
     return (
       <View>
-        <Text style={[styles.content, { color: colors.foreground }]}>{content || 'Instagram post'}</Text>
+        {content ? (
+          <Text style={[styles.content, { color: colors.foreground }]}>{content}</Text>
+        ) : null}
         {!full && isLongPost && (
           <Text style={[styles.expandHint, { color: colors.primary }]}>
             {expanded ? '- Collapse' : '+ Expand'}
@@ -157,13 +181,19 @@ export default function PostCard({ post, onCompose }: Props) {
             </View>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setTextExpanded(value => !value)} activeOpacity={0.8}>
+        <TouchableOpacity onPress={() => setDetailVisible(true)} activeOpacity={0.8}>
           {renderPostContent(false)}
         </TouchableOpacity>
 
         <View style={styles.mediaGrid}>
           {media.slice(0, 4).map((item, index) => (
-            <MediaItem key={`${item.url}-${index}`} item={item} onImagePress={setImageUrl} />
+            <MediaItem
+              key={`${item.url}-${index}`}
+              item={item}
+              onImagePress={setImageUrl}
+              visible={visible && !anyFullscreen}
+              onFullscreenChange={setAnyFullscreen}
+            />
           ))}
         </View>
 
@@ -194,7 +224,15 @@ export default function PostCard({ post, onCompose }: Props) {
             </View>
             <ScrollView contentContainerStyle={styles.detailContent}>
               {renderPostContent(true)}
-              {media.map((item, index) => <MediaItem key={`detail-${item.url}-${index}`} item={item} onImagePress={setImageUrl} />)}
+              {media.map((item, index) => (
+                <MediaItem
+                  key={`detail-${item.url}-${index}`}
+                  item={item}
+                  onImagePress={setImageUrl}
+                  visible={true}
+                  onFullscreenChange={setAnyFullscreen}
+                />
+              ))}
             </ScrollView>
             <TouchableOpacity onPress={openOriginal} style={[styles.openButton, { backgroundColor: colors.primary }]}>
               <Feather name="external-link" size={15} color="#FFF" />
