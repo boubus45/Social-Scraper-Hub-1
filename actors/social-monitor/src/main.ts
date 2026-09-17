@@ -52,6 +52,32 @@ function redditMedia(post: Record<string, unknown>): Array<{ type: "image" | "vi
   return media;
 }
 
+function cleanAtomContent(value: string): string {
+  const decode = (v: string) => v
+    .replace(/&#x27;|&#39;|&apos;/gi, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, decimal: string) => String.fromCodePoint(Number(decimal)))
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"');
+  let decoded = value;
+  try { decoded = JSON.parse(`"${value}"`); } catch { /* keep */ }
+  return decode(decode(decoded));
+}
+
+function atomText(block: string, tag: string): string {
+  const match = block.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  return match?.[1] ?? '';
+}
+
+function atomAttribute(block: string, tag: string, attribute: string): string {
+  const element = block.match(new RegExp(`<${tag}\\b[^>]*>`, 'i'))?.[0] ?? '';
+  const match = element.match(new RegExp(`${attribute}\\s*=\\s*["']([^"']+)["']`, 'i'));
+  return match?.[1] ?? '';
+}
+
 async function runReddit(input: Input): Promise<void> {
   const limit = Math.min(Math.max(input.limit ?? 10, 1), 25);
   const sources = [...new Set((input.sources ?? input.accounts ?? []).filter(source => typeof source === "string"))].slice(0, 10);
@@ -59,21 +85,33 @@ async function runReddit(input: Input): Promise<void> {
     const source = normalizeRedditSource(rawSource);
     if (!/^[a-zA-Z0-9_]{1,50}$/.test(source.slug)) continue;
     const endpoint = source.isUser
-      ? `https://www.reddit.com/user/${encodeURIComponent(source.slug)}/submitted.json?raw_json=1&limit=${limit}`
-      : `https://www.reddit.com/r/${encodeURIComponent(source.slug)}/hot.json?raw_json=1&limit=${limit}`;
-    const response = await fetch(endpoint, {
-      headers: { Accept: "application/json", "User-Agent": "SocialScraperUnifiedMonitor/1.0" },
-    });
-    if (!response.ok) throw new Error(`Reddit ${source.isUser ? `u/${source.slug}` : `r/${source.slug}`} returned HTTP ${response.status}.`);
-    const listing = (await response.json()) as RedditListing;
-    for (const child of listing.data?.children ?? []) {
-      const post = child.data;
-      if (!post || post.stickied || post.over_18) continue;
-      const id = typeof post.id === "string" ? post.id : "";
-      const title = typeof post.title === "string" ? post.title : "";
-      const selftext = typeof post.selftext === "string" ? post.selftext.trim() : "";
-      if (!id || (!title && !selftext)) continue;
-      const permalink = typeof post.permalink === "string" ? post.permalink : "";
+      ? `https://www.reddit.com/user/${encodeURIComponent(source.slug)}/.rss?limit=${limit}`
+      : `https://www.reddit.com/r/${encodeURIComponent(source.slug)}/.rss?limit=${limit}`;
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      response = await fetch(endpoint, {
+        headers: {
+          Accept: "application/atom+xml, application/xml, text/xml",
+          "User-Agent": "SocialScraperUnifiedMonitor/1.0",
+        },
+      });
+      if (response.status !== 429 || attempt === 2) break;
+      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 2000));
+    }
+    if (!response || !response.ok) continue;
+    const xml = await response.text();
+    const entries = xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
+    for (const entry of entries) {
+      const title = cleanAtomContent(atomText(entry, "title"));
+      const description = cleanAtomContent(atomText(entry, "content"))
+        .replace(/\s+submitted by\s+\/u\/\S+[\s\S]*$/i, "")
+        .trim();
+      const text = description && !/^\[?(link|comments)\]?$/i.test(description) ? description : title;
+      const id = atomText(entry, "id").trim().replace(/^t3_/, "");
+      if (!text && !id) continue;
+      const authorName = cleanAtomContent(atomText(entry, "name")).replace(/^\/u\//i, "").trim() || "Reddit";
+      const postUrl = atomAttribute(entry, "link", "href");
+      const published = atomText(entry, "published").trim() || atomText(entry, "updated").trim();
       await Actor.pushData({
         platform: "reddit",
         account: {
@@ -81,18 +119,17 @@ async function runReddit(input: Input): Promise<void> {
           displayName: source.isUser ? `u/${source.slug}` : `r/${source.slug}`,
         },
         post: {
-          id,
-          url: `https://www.reddit.com${permalink}`,
-          text: selftext || title,
-          publishedAt: typeof post.created_utc === "number" ? new Date(post.created_utc * 1000).toISOString() : undefined,
-          media: redditMedia(post),
+          id: id || `rss_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          url: postUrl || "https://www.reddit.com",
+          text,
+          publishedAt: published && !Number.isNaN(new Date(published).getTime()) ? new Date(published).toISOString() : undefined,
+          media: [
+            atomAttribute(entry, "media:content", "url"),
+            atomAttribute(entry, "media:thumbnail", "url"),
+            atomAttribute(entry, "enclosure", "url"),
+          ].filter(v => /^https?:\/\//i.test(v)),
         },
-        metrics: {
-          likes: typeof post.ups === "number" ? post.ups : 0,
-          comments: typeof post.num_comments === "number" ? post.num_comments : 0,
-          shares: 0,
-          views: 0,
-        },
+        metrics: { likes: 0, comments: 0, shares: 0, views: 0 },
         monitorId: input.monitorId,
       });
     }

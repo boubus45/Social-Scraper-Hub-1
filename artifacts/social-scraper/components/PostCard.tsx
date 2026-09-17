@@ -55,11 +55,26 @@ function MediaItem({
   const [fullscreen, setFullscreen] = useState(false);
   const videoRef = useRef<Video>(null);
 
+  const togglePlayback = async () => {
+    if (!videoRef.current) return;
+    if (playing) {
+      await videoRef.current.pauseAsync();
+      setPlaying(false);
+    } else {
+      await videoRef.current.playAsync();
+      setPlaying(true);
+    }
+  };
+
+  const openFullscreen = () => {
+    setFullscreen(true);
+    onFullscreenChange(true);
+  };
+
   const closeFullscreen = async () => {
     setFullscreen(false);
     onFullscreenChange(false);
     await ScreenOrientation.unlockAsync();
-    await videoRef.current?.stopAsync();
     setPlaying(false);
   };
 
@@ -72,24 +87,27 @@ function MediaItem({
           source={{ uri: item.url }}
           style={styles.media}
           resizeMode={ResizeMode.CONTAIN}
-          useNativeControls
-          shouldPlay={playing && visible}
+          shouldPlay={visible && playing}
           isLooping
-          onPlaybackStatusUpdate={(status) => {
-            if (status.isLoaded && !status.isPlaying && status.didJustFinish === false && playing) {
-              // video paused natively or buffering
+          onPlaybackStatusUpdate={(s) => {
+            if (s.isLoaded && !s.isPlaying && playing) {
+              setPlaying(false);
             }
           }}
         />
-        {!playing && (
-          <TouchableOpacity style={styles.playButton} onPress={() => setPlaying(true)} accessibilityLabel="Play video">
-            <Feather name="play" size={24} color="#FFF" />
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.fullscreenButton} onPress={async () => {
-          setFullscreen(true);
-          onFullscreenChange(true);
-        }} accessibilityLabel="Open video fullscreen">
+        <TouchableOpacity
+          style={styles.videoOverlay}
+          onPress={togglePlayback}
+          activeOpacity={0.9}
+          accessibilityLabel={playing ? "Pause video" : "Play video"}
+        >
+          {!playing && (
+            <View style={styles.playButton}>
+              <Feather name="play" size={24} color="#FFF" />
+            </View>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.fullscreenButton} onPress={openFullscreen} accessibilityLabel="Open video fullscreen">
           <Feather name="maximize-2" size={18} color="#FFF" />
         </TouchableOpacity>
       </View>
@@ -269,7 +287,8 @@ const styles = StyleSheet.create({
   mediaGrid: { gap: 8 },
   mediaFrame: { width: '100%', aspectRatio: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: '#252538' },
   media: { width: '100%', height: '100%' },
-  playButton: { position: 'absolute', alignSelf: 'center', top: '42%', width: 56, height: 56, borderRadius: 28, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center', paddingLeft: 4 },
+  videoOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  playButton: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center', paddingLeft: 4 },
   fullscreenButton: { position: 'absolute', right: 10, bottom: 10, width: 38, height: 38, borderRadius: 19, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center' },
   videoFullscreen: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   fullscreenVideo: { width: '100%', height: '100%' },
