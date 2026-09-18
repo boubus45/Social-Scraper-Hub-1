@@ -334,19 +334,53 @@ pnpm codegen                # Generate API types/client
 ### Clickable URLs in posts
 - `artifacts/social-scraper/components/PostCard.tsx` parses URLs in post content and renders them as blue, tappable links using `Linking.openURL`. Detects `http://`, `https://`, and `www.` prefixed URLs.
 
-### OAuth connection buttons in Settings
-- `artifacts/social-scraper/app/(tabs)/settings.tsx` adds an **Account Connection** section per platform inside the expanded Social Networks card.
-- Uses `expo-web-browser`'s `openAuthSessionAsync` to run the OAuth flow. If the platform's Client ID is not configured, an alert prompts the user to set it in the credentials section below.
-- `hasOAuthCredentials()` checks whether any credentials/tokens for the platform are present and renders either a Connected + Disconnect row or a **Connect with {Platform}** button.
-- `OAUTH_CONFIG` maps each `PlatformId` to `authUrl`, `redirectUri`, and `scopes`. Redirect URIs use a custom scheme `socialscraper://oauth/{platform}` (replace with your real app scheme and backend token exchange endpoint).
+### Full OAuth flow (fetch + post)
+- **Backend:** `artifacts/api-server/src/services/oauthService.ts` — token storage, exchange, refresh per platform. Reads client IDs/secrets from env vars.
+- **Backend:** `artifacts/api-server/src/routes/oauth.ts` — endpoints:
+  - `GET /api/oauth/:platform/auth-url` — returns authorization URL (backend knows client_id, frontend doesn't)
+  - `POST /api/oauth/:platform/callback` — exchanges code for token, stores it
+  - `GET /api/oauth/:platform/status` — connection status
+  - `DELETE /api/oauth/:platform` — disconnect
+  - `POST /api/oauth/:platform/token` — get valid token (refreshes if needed, used by posting)
+- **Backend:** `artifacts/api-server/src/services/platformPosters.ts` — server-side posting using stored tokens (Reddit, X, LinkedIn)
+- **Backend:** `artifacts/api-server/src/routes/post.ts` — `POST /api/post/:platform` for scheduled post execution
+- **Frontend:** `artifacts/social-scraper/app/(tabs)/settings.tsx` — updated `handleOAuthLogin` to use backend-driven auth URL, PKCE for Twitter, deep link redirect capture, token exchange via backend
+
+### OAuth env vars needed per platform (in `artifacts/api-server/.env`)
+- `REDDIT_OAUTH_CLIENT_ID` / `REDDIT_OAUTH_CLIENT_SECRET`
+- `X_OAUTH_CLIENT_ID`
+- `LINKEDIN_OAUTH_CLIENT_ID` / `LINKEDIN_OAUTH_CLIENT_SECRET`
+- `FACEBOOK_OAUTH_CLIENT_ID` / `FACEBOOK_OAUTH_CLIENT_SECRET`
+- `INSTAGRAM_OAUTH_CLIENT_ID` / `INSTAGRAM_OAUTH_CLIENT_SECRET`
 
 ### Facebook monitor actor
-- `actors/facebook-monitor/` contains a dedicated Apify Actor (PlaywrightCrawler) that scrapes public Facebook pages. Deployed as `3GKIxiJareOmz3AKW`. **Known limitation:** Facebook requires login to view public pages, so the actor may return 0 posts without a valid session/cookie input.
+- `actors/facebook-monitor/` contains a dedicated Apify Actor (PlaywrightCrawler) that scrapes public Facebook pages. Deployed as `3GKIxiJareOmz3AKW`. Supports `cookies` input for session auth.
 
 ### Key new files
 - `actors/facebook-monitor/src/main.ts`, `package.json`, `tsconfig.json`, `.actor/actor.json`, `.actor/INPUT_SCHEMA.json`, `Dockerfile`
 - `artifacts/social-scraper/components/PostCard.tsx` — added `ClickableText` and `parseTextWithUrls` helpers
-- `artifacts/social-scraper/app/(tabs)/settings.tsx` — added `OAUTH_CONFIG`, `handleOAuthLogin`, `hasOAuthCredentials`, and OAuth UI styles
+- `artifacts/social-scraper/app/(tabs)/settings.tsx` — updated `OAUTH_CONFIG`, `handleOAuthLogin`, `hasOAuthCredentials`, OAuth UI styles
+- `artifacts/api-server/src/services/oauthService.ts` — token storage, exchange, refresh
+- `artifacts/api-server/src/services/platformPosters.ts` — server-side posting with stored tokens
+- `artifacts/api-server/src/routes/oauth.ts` — OAuth endpoints
+- `artifacts/api-server/src/routes/post.ts` — posting endpoint
+
+### How posting works now
+1. User schedules a post in the app (compose → schedule for later)
+2. AppContext `executeScheduledDraft` sends content + userId to backend
+3. Backend looks up stored OAuth token → refreshes if needed → posts via platform API
+4. Result returned to frontend, shown in alert
+
+### Reddit OAuth credentials mode (alternative)
+- `artifacts/api-server/src/services/redditMonitor.ts` — also accepts `clientId`/`clientSecret`/`username`/`password` via `startRedditRun(credentials)` for password grant (no browser OAuth needed)
+- Frontend `AppContext.tsx` passes these from `PlatformSettings.credentials` on refresh
+
+### Typecheck/build status
+- `pnpm run typecheck` passes after these edits.
+- `pnpm run build` passes for the api-server.
+
+### Recent commit
+- `ad50432` on main: feat: Reddit OAuth + Facebook cookie auth (includes all OAuth flow work).
 
 ### OAuth setup needed to make buttons functional
 1. Register OAuth apps on each platform's developer console (X, Reddit, LinkedIn, Facebook, Instagram).

@@ -27,72 +27,140 @@ import { FETCH_FREQUENCY_LABELS, FetchFrequency, PlatformCredentials, PlatformId
 const OAUTH_CONFIG: Record<PlatformId, {
   label: string;
   authUrl: string;
-  clientId?: string;
+  clientIdEnv: string; // env var name holding the client ID
   redirectUri: string;
   scopes: string[];
+  usePkce?: boolean; // Twitter/PKCE flow
 } | null> = {
   x: {
     label: 'X (Twitter)',
     authUrl: 'https://twitter.com/i/oauth2/authorize',
-    clientId: '',
+    clientIdEnv: 'X_OAUTH_CLIENT_ID',
     redirectUri: 'socialscraper://oauth/x',
-    scopes: ['tweet.read', 'tweet.write', 'users.read'],
+    scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
+    usePkce: true,
   },
   reddit: {
     label: 'Reddit',
     authUrl: 'https://www.reddit.com/api/v1/authorize',
-    clientId: '',
+    clientIdEnv: 'REDDIT_OAUTH_CLIENT_ID',
     redirectUri: 'socialscraper://oauth/reddit',
-    scopes: ['read', 'identity'],
+    scopes: ['read', 'identity', 'submit'],
+    usePkce: false,
   },
   linkedin: {
     label: 'LinkedIn',
     authUrl: 'https://www.linkedin.com/oauth/v2/authorization',
-    clientId: '',
+    clientIdEnv: 'LINKEDIN_OAUTH_CLIENT_ID',
     redirectUri: 'socialscraper://oauth/linkedin',
-    scopes: ['openid', 'profile', 'email'],
+    scopes: ['openid', 'profile', 'email', 'w_member_social'],
+    usePkce: false,
   },
   facebook: {
     label: 'Facebook',
     authUrl: 'https://www.facebook.com/v18.0/dialog/oauth',
-    clientId: '',
-    redirectUri: 'https://www.facebook.com/connect/login_success.html',
-    scopes: ['public_profile', 'email'],
+    clientIdEnv: 'FACEBOOK_OAUTH_CLIENT_ID',
+    redirectUri: 'socialscraper://oauth/facebook',
+    scopes: ['public_profile', 'email', 'pages_read_engagement'],
+    usePkce: false,
   },
   instagram: {
     label: 'Instagram',
     authUrl: 'https://api.instagram.com/oauth/authorize',
-    clientId: '',
-    redirectUri: 'https://www.instagram.com/',
+    clientIdEnv: 'INSTAGRAM_OAUTH_CLIENT_ID',
+    redirectUri: 'socialscraper://oauth/instagram',
     scopes: ['user_profile', 'user_media'],
+    usePkce: false,
   },
 };
 
+// Generate PKCE code verifier and challenge
+async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
+  const verifier = Array.from({ length: 64 }, () => 
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~'[
+      Math.floor(Math.random() * 66)
+    ]
+  ).join('');
+  
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  
+  return { verifier, challenge };
+}
+
 async function handleOAuthLogin(platform: PlatformId): Promise<void> {
   const config = OAUTH_CONFIG[platform];
-  if (!config || !config.clientId) {
-    Alert.alert(
-      'OAuth Not Configured',
-      `Please set the Client ID for ${config?.label ?? platform} in the credentials section below.`
-    );
-    return;
-  }
+  if (!config) return;
 
+  const baseUrl = API_BASE_URL.replace(/\/api$/, "");
+  
   try {
-    const params = new URLSearchParams({
-      client_id: config.clientId,
-      redirect_uri: config.redirectUri,
-      response_type: 'code',
-      scope: config.scopes.join(' '),
-    });
-    const url = `${config.authUrl}?${params.toString()}`;
-    await WebBrowser.openAuthSessionAsync(url, config.redirectUri);
+    // Fetch the auth URL from backend (which knows the client ID)
+    const authUrlRes = await fetch(`${baseUrl}/api/oauth/${platform}/auth-url`);
+    if (!authUrlRes.ok) {
+      const err = await authUrlRes.text();
+      Alert.alert('Error', err || `OAuth not configured for ${config.label}`);
+      return;
+    }
+    const { url, redirectUri } = await authUrlRes.json() as { url: string; redirectUri: string };
+
+    let codeVerifier: string | undefined;
+    
+    let authUrl = new URL(url);
+    if (config.usePkce) {
+      const pkce = await generatePkce();
+      codeVerifier = pkce.verifier;
+      // Append PKCE params to the auth URL
+      authUrl.searchParams.set('code_challenge', pkce.challenge);
+      authUrl.searchParams.set('code_challenge_method', 'S256');
+    }
+
+    // Open the auth session
+    const result = await WebBrowser.openAuthSessionAsync(authUrl.toString(), redirectUri);
+    
+    if (result.type === 'success' && result.url) {
+      // Extract code from redirect URL
+      const redirectUrl = new URL(result.url);
+      const code = redirectUrl.searchParams.get('code');
+      if (code) {
+        // Send code to backend for token exchange
+        const callbackRes = await fetch(`${baseUrl}/api/oauth/${platform}/callback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code,
+            userId: 'local-user',
+            codeVerifier,
+          }),
+        });
+        
+        if (callbackRes.ok) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          Alert.alert('Success', `Connected to ${config.label}!`);
+        } else {
+          const error = await callbackRes.text();
+          Alert.alert('Error', `Failed to connect: ${error}`);
+        }
+      }
+    }
   } catch (error) {
     Alert.alert('Error', `Failed to open ${config.label} login. ${error instanceof Error ? error.message : ''}`);
   }
 }
 
+const API_BASE_URL = (
+  process.env.EXPO_PUBLIC_API_URL
+  ?? "https://shiny-memory-7499jrvjj652xprv-3000.app.github.dev/api"
+).replace(/\/+$/, "").replace(/\/api$/, "");
+
 function hasOAuthCredentials(platform: PlatformId, credentials: PlatformCredentials): boolean {
+  // This is now a fallback for manual credential mode.
+  // Primary connection state comes from the backend OAuth store.
   switch (platform) {
     case 'x':
       return !!(credentials.bearerToken || credentials.accessToken);

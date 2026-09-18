@@ -898,24 +898,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ─── Scheduler ────────────────────────────────────────────────────────────
+  const postToPlatformViaBackend = useCallback(async (pid: string, content: string, subreddit?: string) => {
+    try {
+      const res = await fetch(`${process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api'}/post/${pid}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, userId: 'local-user', subreddit }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        throw new Error(err.error ?? `Failed to post to ${pid}`);
+      }
+      return await res.json() as { ok: boolean; url?: string };
+    } catch (error) {
+      throw error;
+    }
+  }, []);
+
   const executeScheduledDraft = useCallback(async (draft: Draft) => {
     const s = settingsRef.current;
     const results: Draft['postResults'] = {};
 
     for (const pid of draft.composedPost.selectedPlatforms) {
-      const pSettings = s.platforms[pid];
+      const pSettings = s.platforms[pid as PlatformId];
       if (!pSettings?.postEnabled) continue;
-      if (!hasPostingCredentials(pid, pSettings.credentials)) continue;
+      if (!hasPostingCredentials(pid as PlatformId, pSettings.credentials)) continue;
 
-      const poster = PLATFORM_POSTERS[pid];
-      if (!poster) continue;
-
-      const content = draft.composedPost.drafts[pid]?.edited
-        ? draft.composedPost.drafts[pid]!.content
+      const content = draft.composedPost.drafts[pid as PlatformId]?.edited
+        ? draft.composedPost.drafts[pid as PlatformId]!.content
         : draft.composedPost.baseContent;
 
       const extra = pid === 'reddit' && draft.redditTarget ? { subreddit: draft.redditTarget } : undefined;
-      results[pid] = await poster(content, pSettings.credentials, extra);
+
+      try {
+        // Try backend API first (uses stored OAuth tokens)
+        const result = await postToPlatformViaBackend(pid, content, extra?.subreddit);
+        results[pid] = { ok: result.ok, url: result.url };
+      } catch (error) {
+        // Fall back to frontend poster (uses manual credentials)
+        const poster = PLATFORM_POSTERS[pid as PlatformId];
+        if (poster) {
+          results[pid] = await poster(content, pSettings.credentials, extra);
+        } else {
+          results[pid] = { ok: false, error: error instanceof Error ? error.message : String(error) };
+        }
+      }
     }
 
     // Update draft with results then remove it
