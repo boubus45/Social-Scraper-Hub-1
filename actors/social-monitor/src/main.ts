@@ -172,13 +172,17 @@ async function runReddit(input: Input): Promise<void> {
         atomAttribute(entry, "enclosure", "url"),
       ].filter(v => /^https?:\/\//i.test(v)).map(url => ({ type: 'image' as const, url }));
       
-      // Deduplicate
-      const allMedia = [...contentMedia, ...rssMedia].filter((m, i, arr) => 
-        arr.findIndex(x => x.url === m.url) === i
-      );
+      // Deduplicate (normalize URLs: decode entities, strip tracking params)
+      const normalizeUrl = (u: string) => u
+        .replace(/&amp;/g, '&')
+        .replace(/&utm_[^&]+/g, '')
+        .replace(/\?+$/, '');
+      
+      const allMedia = [...contentMedia, ...rssMedia]
+        .filter((m, i, arr) => arr.findIndex(x => normalizeUrl(x.url) === normalizeUrl(m.url)) === i);
       
       // Post URL itself might be an image
-      if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(postUrl) && !allMedia.some(m => m.url === postUrl)) {
+      if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(postUrl) && !allMedia.some(m => normalizeUrl(m.url) === normalizeUrl(postUrl))) {
         allMedia.push({ type: 'image', url: postUrl });
       }
       
