@@ -122,15 +122,66 @@ async function runReddit(input: Input): Promise<void> {
     const entries = xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
     for (const entry of entries) {
       const title = cleanAtomContent(atomText(entry, "title"));
-      const description = cleanAtomContent(atomText(entry, "content"))
-        .replace(/\s+submitted by\s+\/u\/\S+[\s\S]*$/i, "")
+      const rawContent = cleanAtomContent(atomText(entry, "content"));
+      
+      // Extract images from HTML content before stripping tags
+      const contentMedia: Array<{ type: 'image' | 'video'; url: string }> = [];
+      const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+      let imgMatch: RegExpExecArray | null;
+      while ((imgMatch = imgRegex.exec(rawContent))) {
+        const imgUrl = imgMatch[1];
+        if (imgUrl && !imgUrl.startsWith('data:') && !contentMedia.some(m => m.url === imgUrl)) {
+          contentMedia.push({ type: 'image', url: imgUrl });
+        }
+      }
+      
+      // Also check for links to images
+      const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>[^<]*<\/a>/gi;
+      let linkMatch: RegExpExecArray | null;
+      while ((linkMatch = linkRegex.exec(rawContent))) {
+        const linkUrl = linkMatch[1];
+        if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(linkUrl) && !contentMedia.some(m => m.url === linkUrl)) {
+          contentMedia.push({ type: 'image', url: linkUrl });
+        }
+      }
+      
+      // Strip HTML tags, preserving line breaks
+      const strippedContent = rawContent
+        .replace(/<(p|br|div|li)[^>]*>/gi, '\n')
+        .replace(/<\/(p|div|li|h[1-6]|blockquote|pre)>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      
+      const description = strippedContent
+        .replace(/\s+submitted by\s+\/u\/\S+[\s\S]*$/i, '')
         .trim();
       const text = description && !/^\[?(link|comments)\]?$/i.test(description) ? description : title;
+      
       const id = atomText(entry, "id").trim().replace(/^t3_/, "");
-      if (!text && !id) continue;
+      if (!text && !id && contentMedia.length === 0) continue;
       const authorName = cleanAtomContent(atomText(entry, "name")).replace(/^\/u\//i, "").trim() || "Reddit";
       const postUrl = atomAttribute(entry, "link", "href");
       const published = atomText(entry, "published").trim() || atomText(entry, "updated").trim();
+      
+      // Combine RSS media with extracted HTML media
+      const rssMedia = [
+        atomAttribute(entry, "media:content", "url"),
+        atomAttribute(entry, "media:thumbnail", "url"),
+        atomAttribute(entry, "enclosure", "url"),
+      ].filter(v => /^https?:\/\//i.test(v)).map(url => ({ type: 'image' as const, url }));
+      
+      // Deduplicate
+      const allMedia = [...contentMedia, ...rssMedia].filter((m, i, arr) => 
+        arr.findIndex(x => x.url === m.url) === i
+      );
+      
+      // Post URL itself might be an image
+      if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(postUrl) && !allMedia.some(m => m.url === postUrl)) {
+        allMedia.push({ type: 'image', url: postUrl });
+      }
+      
       await Actor.pushData({
         platform: "reddit",
         account: {

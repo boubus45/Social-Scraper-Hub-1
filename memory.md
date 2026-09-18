@@ -280,6 +280,7 @@ pnpm codegen                # Generate API types/client
 | Modify UI screen | `artifacts/social-scraper/app/(tabs)/*.tsx` or `app/edit/[postId].tsx` |
 | Modify feed posts | `artifacts/social-scraper/components/PostCard.tsx` (videos, captions, fullscreen, media display) |
 | Change feed visibility | `artifacts/social-scraper/app/(tabs)/index.tsx` (FlatList `onViewableItemsChanged`) |
+| Fix Reddit parsing | `artifacts/api-server/src/services/redditMonitor.ts` (RSS parsing, HTML stripping, image extraction) |
 | Change app theme | `constants/colors.ts`, `hooks/useColors.ts` |
 | Add database table | `lib/db/src/schema/index.ts` (use Drizzle), run `pnpm push` |
 | Update validation | `lib/api-zod/src/generated/api.ts` or regenerate |
