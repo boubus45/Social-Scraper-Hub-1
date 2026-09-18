@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import {
   Alert,
   Image,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -15,11 +16,98 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser';
 import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
 import PlatformBadge from '@/components/PlatformBadge';
 import { PLATFORM_LIST } from '@/constants/platforms';
 import { FETCH_FREQUENCY_LABELS, FetchFrequency, PlatformCredentials, PlatformId } from '@/types';
+
+// OAuth configuration for each platform
+const OAUTH_CONFIG: Record<PlatformId, {
+  label: string;
+  authUrl: string;
+  clientId?: string;
+  redirectUri: string;
+  scopes: string[];
+} | null> = {
+  x: {
+    label: 'X (Twitter)',
+    authUrl: 'https://twitter.com/i/oauth2/authorize',
+    clientId: '',
+    redirectUri: 'socialscraper://oauth/x',
+    scopes: ['tweet.read', 'tweet.write', 'users.read'],
+  },
+  reddit: {
+    label: 'Reddit',
+    authUrl: 'https://www.reddit.com/api/v1/authorize',
+    clientId: '',
+    redirectUri: 'socialscraper://oauth/reddit',
+    scopes: ['read', 'identity'],
+  },
+  linkedin: {
+    label: 'LinkedIn',
+    authUrl: 'https://www.linkedin.com/oauth/v2/authorization',
+    clientId: '',
+    redirectUri: 'socialscraper://oauth/linkedin',
+    scopes: ['openid', 'profile', 'email'],
+  },
+  facebook: {
+    label: 'Facebook',
+    authUrl: 'https://www.facebook.com/v18.0/dialog/oauth',
+    clientId: '',
+    redirectUri: 'https://www.facebook.com/connect/login_success.html',
+    scopes: ['public_profile', 'email'],
+  },
+  instagram: {
+    label: 'Instagram',
+    authUrl: 'https://api.instagram.com/oauth/authorize',
+    clientId: '',
+    redirectUri: 'https://www.instagram.com/',
+    scopes: ['user_profile', 'user_media'],
+  },
+};
+
+async function handleOAuthLogin(platform: PlatformId): Promise<void> {
+  const config = OAUTH_CONFIG[platform];
+  if (!config || !config.clientId) {
+    Alert.alert(
+      'OAuth Not Configured',
+      `Please set the Client ID for ${config?.label ?? platform} in the credentials section below.`
+    );
+    return;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      client_id: config.clientId,
+      redirect_uri: config.redirectUri,
+      response_type: 'code',
+      scope: config.scopes.join(' '),
+    });
+    const url = `${config.authUrl}?${params.toString()}`;
+    await WebBrowser.openAuthSessionAsync(url, config.redirectUri);
+  } catch (error) {
+    Alert.alert('Error', `Failed to open ${config.label} login. ${error instanceof Error ? error.message : ''}`);
+  }
+}
+
+function hasOAuthCredentials(platform: PlatformId, credentials: PlatformCredentials): boolean {
+  switch (platform) {
+    case 'x':
+      return !!(credentials.bearerToken || credentials.accessToken);
+    case 'reddit':
+      return !!(credentials.clientId && credentials.clientSecret);
+    case 'linkedin':
+      return !!(credentials.accessToken);
+    case 'facebook':
+      return !!(credentials.accessToken || credentials.cookies);
+    case 'instagram':
+      return !!(credentials.accessToken || credentials.cookies);
+    default:
+      return false;
+  }
+}
 
 function SectionHeader({ title, icon }: { title: string; icon: string }) {
   const colors = useColors();
@@ -139,7 +227,7 @@ export default function SettingsScreen() {
           const isLast = idx === PLATFORM_LIST.length - 1;
 
           return (
-            <View key={platform.id}>
+            <View key={platform.id} >
               {/* Platform row */}
               <TouchableOpacity
                 onPress={() => {
@@ -173,6 +261,38 @@ export default function SettingsScreen() {
               {/* Expanded details */}
               {isExpanded && (
                 <View style={[styles.platformDetails, { borderBottomColor: isLast ? 'transparent' : colors.border }]}>
+
+                  {/* OAuth Connection Button */}
+                  <View style={styles.oauthSection}>
+                    <Text style={[styles.monitoringLabel, { color: colors.foreground }]}>
+                      Account Connection
+                    </Text>
+                    {hasOAuthCredentials(platform.id, pSettings.credentials) ? (
+                      <View style={styles.oauthConnectedRow}>
+                        <Feather name="check-circle" size={16} color={colors.success} />
+                        <Text style={[styles.oauthConnectedText, { color: colors.success }]}>
+                          Connected
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            updatePlatformSettings(platform.id, { credentials: {} });
+                          }}
+                          style={[styles.disconnectBtn, { borderColor: colors.border }]}
+                        >
+                          <Text style={[styles.disconnectText, { color: colors.destructive }]}>Disconnect</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        onPress={() => handleOAuthLogin(platform.id)}
+                        style={[styles.oauthButton, { backgroundColor: platform.bgColor }]}
+                      >
+                        <Feather name="link" size={14} color="#FFF" />
+                        <Text style={styles.oauthButtonText}>Connect with {platform.name}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
 
                   {/* Followed accounts */}
                   <Text style={[styles.monitoringLabel, { color: colors.foreground }]}>
@@ -659,5 +779,43 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 2,
     flex: 1,
+  },
+  oauthSection: {
+    marginBottom: 16,
+    gap: 8,
+  },
+  oauthConnectedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  oauthConnectedText: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+    flex: 1,
+  },
+  disconnectBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  disconnectText: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
+  oauthButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  oauthButtonText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
   },
 });

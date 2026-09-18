@@ -1,0 +1,11 @@
+{
+  "actorSpecification": 1,
+  "name": "facebook-monitor",
+  "title": "Facebook Page Monitor",
+  "description": "Monitors Facebook public pages for new posts, media, and metrics.",
+  "version": "1.0",
+  "build": {
+    "dockerfile": "./Dockerfile"
+  },
+  "input": "./INPUT_SCHEMA.json"
+}

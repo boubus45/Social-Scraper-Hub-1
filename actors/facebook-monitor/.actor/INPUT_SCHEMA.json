@@ -1,0 +1,39 @@
+{
+  "title": "Facebook monitor input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "pages": {
+      "title": "Facebook pages",
+      "description": "Facebook page usernames to monitor.",
+      "type": "array",
+      "editor": "stringList",
+      "default": [],
+      "items": { "type": "string" }
+    },
+    "maxPostsPerPage": {
+      "title": "Posts per page",
+      "description": "Maximum posts to collect per page.",
+      "type": "integer",
+      "editor": "number",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 20
+    },
+    "onlyNew": {
+      "title": "Only new posts",
+      "description": "Skip posts already recorded for this monitor.",
+      "type": "boolean",
+      "editor": "checkbox",
+      "default": true
+    },
+    "monitorId": {
+      "title": "Monitor ID",
+      "description": "Backend monitor identifier attached to output records.",
+      "type": "string",
+      "editor": "textfield",
+      "default": "local"
+    }
+  },
+  "required": ["pages"]
+}

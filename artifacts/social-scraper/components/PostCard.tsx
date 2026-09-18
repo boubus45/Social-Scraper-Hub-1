@@ -34,6 +34,77 @@ function formatCount(n?: number): string {
   return n.toString();
 }
 
+// Regex to detect URLs in text
+const URL_REGEX = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)|(www\.[^\s<>"{}|\\^`[\]]+)/gi;
+
+interface TextSegment {
+  text: string;
+  url?: string;
+}
+
+function parseTextWithUrls(text: string): TextSegment[] {
+  if (!text) return [];
+  const segments: TextSegment[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  // Reset regex
+  URL_REGEX.lastIndex = 0;
+
+  while ((match = URL_REGEX.exec(text)) !== null) {
+    // Add text before the URL
+    if (match.index > lastIndex) {
+      segments.push({ text: text.slice(lastIndex, match.index) });
+    }
+    const url = match[0];
+    const normalizedUrl = url.startsWith('www.') ? `https://${url}` : url;
+    segments.push({ text: url, url: normalizedUrl });
+    lastIndex = URL_REGEX.lastIndex;
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    segments.push({ text: text.slice(lastIndex) });
+  }
+
+  return segments;
+}
+
+function ClickableText({ 
+  text, 
+  color, 
+  primaryColor, 
+  style 
+}: { 
+  text: string; 
+  color: string; 
+  primaryColor: string; 
+  style?: any;
+}) {
+  const segments = parseTextWithUrls(text);
+  
+  if (segments.length === 0) return <Text style={style}>{text}</Text>;
+
+  return (
+    <Text style={style}>
+      {segments.map((segment, i) => {
+        if (segment.url) {
+          return (
+            <Text
+              key={i}
+              style={{ color: primaryColor }}
+              onPress={() => Linking.openURL(segment.url!)}
+            >
+              {segment.text}
+            </Text>
+          );
+        }
+        return <Text key={i}>{segment.text}</Text>;
+      })}
+    </Text>
+  );
+}
+
 interface Props {
   post: Post;
   onCompose: () => void;
@@ -167,7 +238,12 @@ export default function PostCard({ post, onCompose, visible }: Props) {
     return (
       <View>
         {content ? (
-          <Text style={[styles.content, { color: colors.foreground }]}>{content}</Text>
+          <ClickableText
+            text={content}
+            color={colors.foreground}
+            primaryColor={colors.primary}
+            style={[styles.content, { color: colors.foreground }]}
+          />
         ) : null}
         {!full && isLongPost && (
           <Text style={[styles.expandHint, { color: colors.primary }]}>
