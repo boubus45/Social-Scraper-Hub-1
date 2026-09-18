@@ -328,4 +328,38 @@ pnpm codegen                # Generate API types/client
 - The deployed unified Actor is `qQh6zsNsdbR2FHnLO` (`social-monitor`, build 1.0.3). `APIFY_SOCIAL_MONITOR_ACTOR_ID` is configured in the local backend `.env`; Instagram falls back to `APIFY_INSTAGRAM_ACTOR_ID` only if the unified variable is absent.
 - `artifacts/social-scraper/lib/redditMonitorApi.ts` and `AppContext.tsx` route Reddit refreshes through the backend, so the APK no longer fetches Reddit directly.
 - `PostCard.tsx` keeps the feed fullscreen button separate from native video controls; the rotate control is shown only inside the custom fullscreen player, and closing it restores the device orientation.
+
+## Latest changes (2026-09-18)
+
+### Clickable URLs in posts
+- `artifacts/social-scraper/components/PostCard.tsx` parses URLs in post content and renders them as blue, tappable links using `Linking.openURL`. Detects `http://`, `https://`, and `www.` prefixed URLs.
+
+### OAuth connection buttons in Settings
+- `artifacts/social-scraper/app/(tabs)/settings.tsx` adds an **Account Connection** section per platform inside the expanded Social Networks card.
+- Uses `expo-web-browser`'s `openAuthSessionAsync` to run the OAuth flow. If the platform's Client ID is not configured, an alert prompts the user to set it in the credentials section below.
+- `hasOAuthCredentials()` checks whether any credentials/tokens for the platform are present and renders either a Connected + Disconnect row or a **Connect with {Platform}** button.
+- `OAUTH_CONFIG` maps each `PlatformId` to `authUrl`, `redirectUri`, and `scopes`. Redirect URIs use a custom scheme `socialscraper://oauth/{platform}` (replace with your real app scheme and backend token exchange endpoint).
+
+### Facebook monitor actor
+- `actors/facebook-monitor/` contains a dedicated Apify Actor (PlaywrightCrawler) that scrapes public Facebook pages. Deployed as `3GKIxiJareOmz3AKW`. **Known limitation:** Facebook requires login to view public pages, so the actor may return 0 posts without a valid session/cookie input.
+
+### Key new files
+- `actors/facebook-monitor/src/main.ts`, `package.json`, `tsconfig.json`, `.actor/actor.json`, `.actor/INPUT_SCHEMA.json`, `Dockerfile`
+- `artifacts/social-scraper/components/PostCard.tsx` — added `ClickableText` and `parseTextWithUrls` helpers
+- `artifacts/social-scraper/app/(tabs)/settings.tsx` — added `OAUTH_CONFIG`, `handleOAuthLogin`, `hasOAuthCredentials`, and OAuth UI styles
+
+### OAuth setup needed to make buttons functional
+1. Register OAuth apps on each platform's developer console (X, Reddit, LinkedIn, Facebook, Instagram).
+2. Set the redirect URI to match the app's deep link scheme.
+3. Add the Client ID/Secret fields to the credentials section (already available below the OAuth button for Reddit; for X and LinkedIn you'd use the existing `clientId`/`clientSecret` keys; for Facebook/Instagram use the `cookies` field or add new fields).
+4. A backend endpoint (not yet implemented) must exchange the authorization code for an access token and store it in `PlatformCredentials` per user.
+
+### Typecheck/build status
+- `pnpm run typecheck` passes after these edits.
+- `pnpm run build` passes for the api-server.
+
+### Recent commit
+- `0a69c48` on main: feat: clickable URLs in posts + OAuth connect buttons in Settings (includes facebook-monitor actor files).
+
+---
 - Settings `TagInput` commits a source/account when Enter or Return is pressed, in addition to comma/semicolon.
