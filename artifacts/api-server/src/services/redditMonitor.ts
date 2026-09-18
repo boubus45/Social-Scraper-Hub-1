@@ -94,8 +94,8 @@ export function getRedditFeed(id: string) {
   return feed.get(id) ?? [];
 }
 
-export async function startRedditRun(monitor: RedditMonitor) {
-  const records = await fetchRedditDirectly(monitor);
+export async function startRedditRun(monitor: RedditMonitor, credentials?: { clientId?: string; clientSecret?: string; username?: string; password?: string }) {
+  const records = await fetchRedditDirectly(monitor, credentials);
   if (records.length > 0) {
     addRedditFeedRecords(monitor.id, records);
     return { id: "local", status: "SUCCEEDED", datasetId: undefined };
@@ -134,7 +134,216 @@ export async function startRedditRun(monitor: RedditMonitor) {
   return { id: body.data.id, status: body.data.status ?? "RUNNING", datasetId: body.data.defaultDatasetId };
 }
 
-async function fetchRedditDirectly(monitor: RedditMonitor): Promise<RedditPostRecord[]> {
+interface RedditOauthToken {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  scope: string;
+}
+
+// Store tokens with expiration
+const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+
+async function getRedditOauthToken(credentials: {
+  clientId?: string;
+  clientSecret?: string;
+  username?: string;
+  password?: string;
+}): Promise<string | null> {
+  if (!credentials.clientId || !credentials.clientSecret || !credentials.username || !credentials.password) {
+    return null;
+  }
+
+  const cacheKey = `${credentials.clientId}:${credentials.username}`;
+  const cached = tokenCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.token;
+  }
+
+  try {
+    const response = await fetch("https://www.reddit.com/api/v1/access_token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": `Basic ${Buffer.from(`${credentials.clientId}:${credentials.clientSecret}`).toString("base64")}`,
+        "User-Agent": "SocialScraperHub/1.0",
+      },
+      body: new URLSearchParams({
+        grant_type: "password",
+        username: credentials.username,
+        password: credentials.password,
+      }).toString(),
+    });
+
+    if (!response.ok) return null;
+    const data = (await response.json()) as RedditOauthToken;
+    if (!data.access_token) return null;
+
+    // Cache the token (expires_in is in seconds, refresh 5 min early)
+    tokenCache.set(cacheKey, {
+      token: data.access_token,
+      expiresAt: Date.now() + (data.expires_in - 300) * 1000,
+    });
+
+    return data.access_token;
+  } catch {
+    return null;
+  }
+}
+
+interface RedditJsonChild {
+  data?: {
+    id: string;
+    title: string;
+    selftext: string;
+    permalink: string;
+    url: string;
+    author: string;
+    created_utc: number;
+    ups: number;
+    num_comments: number;
+    media?: {
+      reddit_video?: {
+        fallback_url: string;
+        dash_url?: string;
+        hls_url?: string;
+      };
+    } | null;
+    secure_media?: {
+      reddit_video?: {
+        fallback_url: string;
+        dash_url?: string;
+        hls_url?: string;
+      };
+    } | null;
+    preview?: {
+      images?: Array<{
+        source: { url: string; width: number; height: number };
+        resolutions: Array<{ url: string; width: number; height: number }>;
+      }>;
+    };
+    is_video: boolean;
+    post_hint: string;
+    domain: string;
+  };
+}
+
+async function fetchRedditWithOauth(
+  slug: string,
+  isUser: boolean,
+  limit: number,
+  token: string,
+): Promise<RedditPostRecord[]> {
+  const records: RedditPostRecord[] = [];
+  const endpoint = isUser
+    ? `https://oauth.reddit.com/user/${encodeURIComponent(slug)}/submitted?limit=${limit}&raw_json=1`
+    : `https://oauth.reddit.com/r/${encodeURIComponent(slug)}/hot?limit=${limit}&raw_json=1`;
+
+  try {
+    const response = await fetch(endpoint, {
+      headers: {
+        "Authorization": `bearer ${token}`,
+        "User-Agent": "SocialScraperHub/1.0",
+      },
+    });
+
+    if (!response.ok) return records;
+    const data = (await response.json()) as { data?: { children?: RedditJsonChild[] } };
+    const children = data.data?.children ?? [];
+
+    for (const child of children) {
+      const post = child.data;
+      if (!post) continue;
+
+      const media: Array<{ type: "image" | "video"; url: string }> = [];
+
+      // Extract video from secure_media or media
+      const videoData = post.secure_media?.reddit_video ?? post.media?.reddit_video;
+      if (videoData?.fallback_url) {
+        media.push({ type: "video", url: videoData.fallback_url });
+      }
+
+      // Extract preview images
+      if (post.preview?.images) {
+        for (const img of post.preview.images) {
+          const imgUrl = decodeHtmlEntities(img.source.url);
+          if (!media.some(m => m.url === imgUrl)) {
+            media.push({ type: "image", url: imgUrl });
+          }
+        }
+      }
+
+      // Direct image/video URL
+      if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(post.url)) {
+        if (!media.some(m => m.url === post.url)) {
+          media.push({ type: "image", url: post.url });
+        }
+      }
+
+      // If no media extracted but it's a video post, add the permalink as fallback
+      if (media.length === 0 && post.is_video && post.permalink) {
+        // Try to get video info from the post URL
+        media.push({ type: "image", url: `https://www.reddit.com${post.permalink}` });
+      }
+
+      const text = post.selftext || post.title;
+      records.push({
+        platform: "reddit",
+        account: {
+          username: slug,
+          displayName: isUser ? `u/${slug}` : `r/${slug}`,
+        },
+        post: {
+          id: post.id,
+          url: `https://www.reddit.com${post.permalink}`,
+          text: text.slice(0, 2000),
+          publishedAt: new Date(post.created_utc * 1000).toISOString(),
+          media,
+        },
+        metrics: {
+          likes: post.ups ?? 0,
+          comments: post.num_comments ?? 0,
+          shares: 0,
+          views: 0,
+        },
+        monitorId: "", // filled in by caller
+      });
+    }
+  } catch (error) {
+    console.error(`Reddit OAuth fetch error for ${slug}:`, error);
+  }
+
+  return records;
+}
+
+async function fetchRedditDirectly(
+  monitor: RedditMonitor,
+  credentials?: { clientId?: string; clientSecret?: string; username?: string; password?: string },
+): Promise<RedditPostRecord[]> {
+  // Try OAuth first if credentials are available
+  const creds = credentials ?? (monitor as unknown as { oauthCredentials?: typeof credentials }).oauthCredentials;
+  if (creds?.clientId && creds?.clientSecret && creds?.username && creds?.password) {
+    const token = await getRedditOauthToken(creds);
+    if (token) {
+      const records: RedditPostRecord[] = [];
+      for (const rawSource of monitor.accounts.slice(0, 10)) {
+        const trimmed = rawSource.trim().replace(/^r\//i, "");
+        const isUser = trimmed.toLowerCase().startsWith("u/");
+        const slug = isUser ? trimmed.slice(2) : trimmed;
+        if (!/^[a-zA-Z0-9_]{1,50}$/.test(slug)) continue;
+
+        const sourceRecords = await fetchRedditWithOauth(slug, isUser, monitor.limit, token);
+        for (const r of sourceRecords) {
+          r.monitorId = monitor.id;
+        }
+        records.push(...sourceRecords);
+      }
+      if (records.length > 0) return records;
+      // Fall back to RSS if OAuth returns nothing
+    }
+  }
+
+  // Fallback: RSS feed parsing
   const records: RedditPostRecord[] = [];
   for (const rawSource of monitor.accounts.slice(0, 10)) {
     const trimmed = rawSource.trim().replace(/^r\//i, "");
@@ -251,6 +460,18 @@ async function fetchRedditDirectly(monitor: RedditMonitor): Promise<RedditPostRe
     }
   }
   return records;
+}
+
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&#x27;|&#39;|&apos;/gi, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, decimal: string) => String.fromCodePoint(Number(decimal)))
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"');
 }
 
 function cleanAtomContent(value: string): string {

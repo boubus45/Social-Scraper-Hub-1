@@ -14,6 +14,7 @@ import { PLATFORM_POSTERS, hasPostingCredentials, getRedditToken, PostResult } f
 import { PLATFORMS } from '@/constants/platforms';
 import { refreshInstagramMonitor, MONITOR_ID_KEY } from '@/lib/instagramMonitorApi';
 import { refreshRedditMonitor, REDDIT_MONITOR_ID_KEY } from '@/lib/redditMonitorApi';
+import { refreshFacebookMonitor, MONITOR_ID_KEY as FACEBOOK_MONITOR_ID_KEY } from '@/lib/facebookMonitorApi';
 
 const STORAGE_KEY = '@socialscraper/settings';
 const POSTS_KEY = '@socialscraper/posts';
@@ -721,7 +722,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (platform === 'reddit') {
           try {
             const monitorId = await AsyncStorage.getItem(REDDIT_MONITOR_ID_KEY);
-            const result = await refreshRedditMonitor(pSettings.followedAccounts, monitorId ?? undefined);
+            const creds = {
+              clientId: pSettings.credentials.clientId,
+              clientSecret: pSettings.credentials.clientSecret,
+              username: pSettings.credentials.username,
+              password: pSettings.credentials.password,
+            };
+            const result = await refreshRedditMonitor(pSettings.followedAccounts, monitorId ?? undefined, false, creds);
             addFetchedPosts(result.posts, platform);
           } catch (e) {
             fetchErrors.push(`Reddit: ${e instanceof Error ? e.message : String(e)}`);
@@ -756,8 +763,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         } else if (platform === 'facebook') {
           if (pSettings.followedAccounts.length > 0) {
             try {
-              const p = await fetchFacebookPosts(pSettings.followedAccounts, pSettings.credentials);
-              if (p.length > 0) addFetchedPosts(p, platform);
+              const monitorId = await AsyncStorage.getItem(FACEBOOK_MONITOR_ID_KEY);
+              const cookies = pSettings.credentials.cookies;
+              const result = await refreshFacebookMonitor(pSettings.followedAccounts, monitorId ?? undefined, false, cookies);
+              if (result.posts.length > 0) addFetchedPosts(result.posts, platform);
               else fetchErrors.push('Facebook: no posts returned. A valid session cookie may be required.');
             } catch (e) {
               fetchErrors.push(`Facebook: ${e instanceof Error ? e.message : 'fetch failed'}`);

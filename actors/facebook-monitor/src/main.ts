@@ -7,6 +7,8 @@ interface Input {
   maxPostsPerPage?: number;
   onlyNew?: boolean;
   monitorId: string;
+  cookies?: string; // Facebook session cookies (sb, c_user, xs, fr)
+  accessToken?: string; // Optional: Facebook Graph API token (not yet used)
 }
 
 interface FacebookRecord {
@@ -37,12 +39,48 @@ function cleanText(text: string): string {
     .trim();
 }
 
+/**
+ * Parse a raw cookie string into an array of Playwright cookie objects.
+ * Expected format: "name1=value1; name2=value2; name3=value3"
+ */
+function parseCookies(cookieStr: string): Array<{ name: string; value: string; domain: string; path: string; secure: boolean; httpOnly: boolean }> {
+  if (!cookieStr || typeof cookieStr !== "string") return [];
+  
+  const cookies: Array<{ name: string; value: string; domain: string; path: string; secure: boolean; httpOnly: boolean }> = [];
+  const pairs = cookieStr.split(";");
+  
+  for (const pair of pairs) {
+    const trimmed = pair.trim();
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) continue;
+    
+    const name = trimmed.slice(0, eqIndex).trim();
+    const value = trimmed.slice(eqIndex + 1).trim();
+    if (name && value) {
+      cookies.push({
+        name,
+        value,
+        domain: ".facebook.com",
+        path: "/",
+        secure: true,
+        httpOnly: name === "xs" || name === "sb",
+      });
+    }
+  }
+  
+  return cookies;
+}
+
 async function runFacebook(input: Input): Promise<void> {
   const pages = [...new Set((input.pages ?? []).map(normalizePage))].filter(p => /^[a-zA-Z0-9._]{1,50}$/.test(p)).slice(0, MAX_PAGES);
   if (pages.length === 0) throw new Error("No valid Facebook pages supplied.");
 
   const maxPosts = Math.min(Math.max(input.maxPostsPerPage ?? 5, 1), MAX_POSTS);
   const found: FacebookRecord[] = [];
+  
+  // Parse cookies from input
+  const cookies = input.cookies ? parseCookies(input.cookies) : [];
+  const hasAuth = cookies.length > 0;
 
   const crawler = new PlaywrightCrawler({
     maxRequestsPerCrawl: pages.length,
@@ -52,6 +90,12 @@ async function runFacebook(input: Input): Promise<void> {
       const username = request.userData.username as string;
       
       try {
+        // Set cookies if provided
+        if (hasAuth && cookies.length > 0) {
+          log.info(`Setting ${cookies.length} cookies for ${username}`);
+          await page.context().addCookies(cookies);
+        }
+
         log.info(`Navigating to ${request.url}`);
         await page.goto(request.url, { waitUntil: "networkidle", timeout: 60000 });
         await sleep(5000);
@@ -61,16 +105,19 @@ async function runFacebook(input: Input): Promise<void> {
         const url = page.url();
         log.info(`Page loaded: "${title}" at ${url}`);
         
+        // Check for login wall
+        const content = await page.content();
+        if (content.includes("Log In") || content.includes("login")) {
+          if (!hasAuth) {
+            log.error(`Login wall detected for ${username}. No cookies provided.`);
+            return;
+          }
+          log.warning(`Login wall detected for ${username}. Cookies may be expired/invalid.`);
+        }
+        
         // Debug: save screenshot for troubleshooting
         await page.screenshot({ path: `/tmp/fb_${username}.png` });
         log.info(`Screenshot saved: /tmp/fb_${username}.png`);
-        
-        // Debug: log page content length
-        const content = await page.content();
-        log.info(`Page content length: ${content.length} chars`);
-        if (content.includes("Log In") || content.includes("login")) {
-          log.warning(`Login wall detected for ${username}`);
-        }
 
         // Extract posts using multiple strategies
         const extracted = await page.evaluate((maxP) => {
@@ -78,7 +125,6 @@ async function runFacebook(input: Input): Promise<void> {
           
           // Strategy 1: Look for article elements (Facebook's structure)
           const articles = document.querySelectorAll('[role="article"]');
-          log.info(`Found ${articles.length} article elements`);
           
           for (const article of articles) {
             if (results.length >= maxP) break;
@@ -115,7 +161,6 @@ async function runFacebook(input: Input): Promise<void> {
           // Strategy 2: Look for specific div patterns
           if (results.length === 0) {
             const divs = document.querySelectorAll('div.x1iorvi4, div.x193iq5u, div[data-ad-preview="message"]');
-            log.info(`Strategy 2: Found ${divs.length} divs`);
             for (const div of divs) {
               if (results.length >= maxP) break;
               const text = div.textContent ?? "";

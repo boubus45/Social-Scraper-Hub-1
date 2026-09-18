@@ -31,7 +31,9 @@ router.post("/monitors/reddit/:id/run", async (req, res) => {
   const monitor = getRedditMonitor(req.params.id);
   if (!monitor) return res.status(404).json({ error: "Monitor not found." });
   try {
-    const run = await startRedditRun(monitor);
+    // Accept credentials from the request body for OAuth
+    const creds = req.body?.credentials as { clientId?: string; clientSecret?: string; username?: string; password?: string } | undefined;
+    const run = await startRedditRun(monitor, creds);
     return res.status(202).json({ run, posts: getRedditFeed(monitor.id) });
   } catch (error) {
     return res.status(502).json({ error: error instanceof Error ? error.message : "Unable to start Apify run." });
