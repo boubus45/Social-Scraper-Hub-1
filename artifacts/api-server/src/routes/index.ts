@@ -5,6 +5,7 @@ import redditMonitorsRouter from "./redditMonitors";
 import facebookMonitorsRouter from "./facebookMonitors";
 import oauthRouter from "./oauth";
 import postRouter from "./post";
+import brightDataRouter from "./brightData";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(redditMonitorsRouter);
 router.use(facebookMonitorsRouter);
 router.use(oauthRouter);
 router.use(postRouter);
+router.use(brightDataRouter);
 
 export default router;

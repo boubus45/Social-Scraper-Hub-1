@@ -396,4 +396,54 @@ pnpm codegen                # Generate API types/client
 - `0a69c48` on main: feat: clickable URLs in posts + OAuth connect buttons in Settings (includes facebook-monitor actor files).
 
 ---
-- Settings `TagInput` commits a source/account when Enter or Return is pressed, in addition to comma/semicolon.
+
+## Bright Data Integration (2026-09-18)
+
+### Architecture
+- **No polling**: Backend waits for Bright Data webhooks instead of scraping
+- **Centralized sources**: Same account scraped once, distributed to all subscribers
+- **Event-driven**: Webhook ingestion → deduplicate → store → notify subscribers
+
+### Database Schema (`lib/db/src/schema/social.ts`)
+- `social_sources`: platform, username, canonical URL, provider job ID, monitoring status, last processed post, subscriber count
+- `subscriptions`: user ↔ source (unique pair)
+- `posts`: source, platform post ID, URL, content/media, published_at, scraped_at
+- Unique constraint on `(source_id, platform_post_id)`
+
+### Plan Limits
+| Plan | Price | Max Accounts | Feed Refresh |
+|------|-------|-------------|--------------|
+| Free | $0 | 3 | 6 hours |
+| Pro | $19.99/mo | 25 | 3 hours |
+| Mega Pro | $39.99/mo | 50 | Instant (webhook) |
+| Ultra Pro | $69.99/mo | 100 | Instant (webhook) |
+
+**Feed refresh NEVER triggers scraping** — only controls how often the app polls the local DB for posts already ingested by webhooks.
+
+### Key Files
+- `artifacts/api-server/src/services/brightDataProvider.ts` — source management, subscription handling, webhook ingestion, deduplication
+- `artifacts/api-server/src/routes/brightData.ts` — REST API for sources, subscriptions, feeds, webhook endpoint
+- `artifacts/api-server/src/services/brightDataProvider.test.ts` — tests for all core logic
+
+### Endpoints
+- `POST /api/webhooks/brightdata` — receives Bright Data webhook payloads
+- `POST /api/sources` — subscribe to a platform account
+- `DELETE /api/sources/:platform/:username` — unsubscribe
+- `GET /api/sources` — list user's subscriptions
+- `GET /api/feed` — get aggregated feed from all subscriptions
+- `GET /api/status` — check if Bright Data is configured
+
+### Bright Data Configuration
+- `BRIGHTDATA_API_TOKEN` — already in `.env`
+- Webhook URL: `https://your-domain.com/api/webhooks/brightdata`
+- Configure scheduled dataset collections in Bright Data dashboard or API
+- `BRIGHTDATA_WEBHOOK_SECRET` (optional) — for webhook validation
+
+### Provider Abstraction
+The `brightDataProvider` is designed to be swappable. The interface is:
+- `subscribe(userId, platform, username)` — add subscription
+- `unsubscribe(userId, platform, username)` — remove subscription
+- `ingestWebhookPayload(payload)` — process incoming posts
+- `getUserFeed(userId, plan)` — retrieve feed
+
+A future Drizzle-based implementation can replace the in-memory store without changing the interface.
