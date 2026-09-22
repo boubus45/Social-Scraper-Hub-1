@@ -397,53 +397,72 @@ pnpm codegen                # Generate API types/client
 
 ---
 
-## Bright Data Integration (2026-09-18)
+## Bright Data Integration (2026-09-22)
 
 ### Architecture
-- **No polling**: Backend waits for Bright Data webhooks instead of scraping
+- **Backend cron**: Hourly collection for Instagram, LinkedIn, TikTok via `/datasets/v3/trigger`
+- **DCA Collectors**: X, Facebook use recurring collectors (configured in Bright Data dashboard)
+- **Apify**: Reddit (no Bright Data dataset exists)
 - **Centralized sources**: Same account scraped once, distributed to all subscribers
 - **Event-driven**: Webhook ingestion → deduplicate → store → notify subscribers
+- **Feed refresh NEVER triggers scraping** — only polls local DB
 
-### Database Schema (`lib/db/src/schema/social.ts`)
-- `social_sources`: platform, username, canonical URL, provider job ID, monitoring status, last processed post, subscriber count
-- `subscriptions`: user ↔ source (unique pair)
-- `posts`: source, platform post ID, URL, content/media, published_at, scraped_at
-- Unique constraint on `(source_id, platform_post_id)`
+### Platform Datasets
 
-### Plan Limits
-| Plan | Price | Max Accounts | Feed Refresh |
-|------|-------|-------------|--------------|
-| Free | $0 | 3 | 6 hours |
-| Pro | $19.99/mo | 25 | 3 hours |
-| Mega Pro | $39.99/mo | 50 | Instant (webhook) |
-| Ultra Pro | $69.99/mo | 100 | Instant (webhook) |
-
-**Feed refresh NEVER triggers scraping** — only controls how often the app polls the local DB for posts already ingested by webhooks.
+| Platform | Dataset ID | Method | On-Demand | Recurring |
+|----------|-----------|--------|-----------|-----------|
+| Instagram | `gd_l1vikfch901nx3by4` | Backend cron | ✅ | ✅ |
+| LinkedIn | `gd_l1viktl72bvl7bjuj0` | Backend cron | ✅ | ✅ |
+| TikTok | `gd_l1villgoiiidt09ci` | Backend cron | ✅ | ✅ |
+| X | `gd_lhqdbl2k1adkkc5tss` | DCA collector | ❌ | ✅ (dashboard) |
+| Facebook | `gd_lfqk7jkk2582box2zn` | DCA collector | ❌ | ✅ (dashboard) |
+| Reddit | *none* | Apify actor | N/A | N/A |
 
 ### Key Files
-- `artifacts/api-server/src/services/brightDataProvider.ts` — source management, subscription handling, webhook ingestion, deduplication
-- `artifacts/api-server/src/routes/brightData.ts` — REST API for sources, subscriptions, feeds, webhook endpoint
-- `artifacts/api-server/src/services/brightDataProvider.test.ts` — tests for all core logic
+- `artifacts/api-server/src/services/brightDataCollection.ts` — unified collection manager
+- `artifacts/api-server/src/services/brightDataDatasets.ts` — dataset configurations per platform
+- `artifacts/api-server/src/routes/brightData.ts` — REST API + webhook endpoint
+- `artifacts/api-server/src/services/brightDataUnified.ts` — on-demand profile fetch + normalizer
+- `artifacts/api-server/src/services/brightDataProvider.ts` — legacy provider (superseded by collection manager)
 
 ### Endpoints
 - `POST /api/webhooks/brightdata` — receives Bright Data webhook payloads
 - `POST /api/sources` — subscribe to a platform account
 - `DELETE /api/sources/:platform/:username` — unsubscribe
 - `GET /api/sources` — list user's subscriptions
+- `GET /api/sources/all` — list all sources (admin/debug)
 - `GET /api/feed` — get aggregated feed from all subscriptions
+- `GET /api/profile/:platform?username=X` — on-demand profile fetch
+- `GET /api/platforms` — list supported platforms
 - `GET /api/status` — check if Bright Data is configured
+- `POST /api/collect/:platform/:username` — manual collection trigger (testing)
 
-### Bright Data Configuration
-- `BRIGHTDATA_API_TOKEN` — already in `.env`
-- Webhook URL: `https://your-domain.com/api/webhooks/brightdata`
-- Configure scheduled dataset collections in Bright Data dashboard or API
+### Collection Loop
+- Backend runs `setInterval` every hour
+- Iterates all active sources with subscribers
+- For on-demand platforms: triggers `/datasets/v3/trigger` with webhook delivery
+- For recurring-only platforms: creates DCA collector, fetches latest snapshot
+- Posts are normalized, deduplicated, stored in-memory
+
+### Deduplication
+- By `platformPostId` (unique per platform)
+- By URL (normalized)
+- Temporal: skips posts older than last ingested post
+
+### DCA Collectors (X, Facebook)
+- Created via `POST /dca/collector` API with webhook delivery
+- Schedule and inputs must be configured in Bright Data dashboard (no API for scheduling)
+- URL: https://brightdata.com/dashboard
+
+### Configuration (`.env`)
+- `BRIGHTDATA_API_TOKEN` — API token
+- `BRIGHTDATA_WEBHOOK_URL` — public HTTPS webhook URL
 - `BRIGHTDATA_WEBHOOK_SECRET` (optional) — for webhook validation
 
-### Provider Abstraction
-The `brightDataProvider` is designed to be swappable. The interface is:
-- `subscribe(userId, platform, username)` — add subscription
-- `unsubscribe(userId, platform, username)` — remove subscription
-- `ingestWebhookPayload(payload)` — process incoming posts
-- `getUserFeed(userId, plan)` — retrieve feed
+### Typecheck/Build Status
+- `pnpm run typecheck` ✅ passes
+- `pnpm run build` ✅ passes (api-server)
 
-A future Drizzle-based implementation can replace the in-memory store without changing the interface.
+### Recent Commits
+- `ec77020` — initial Bright Data integration (webhook-driven)
+- (no push yet — implementing per-platform collection)

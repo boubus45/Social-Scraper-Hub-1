@@ -72,6 +72,7 @@ const OAUTH_CONFIG: Record<PlatformId, {
     scopes: ['user_profile', 'user_media'],
     usePkce: false,
   },
+  tiktok: null,
 };
 
 // Generate PKCE code verifier and challenge

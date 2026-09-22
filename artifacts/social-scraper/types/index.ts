@@ -1,4 +1,4 @@
-export type PlatformId = 'x' | 'reddit' | 'linkedin' | 'facebook' | 'instagram';
+export type PlatformId = 'x' | 'reddit' | 'linkedin' | 'facebook' | 'instagram' | 'tiktok';
 
 export interface PlatformDef {
   id: PlatformId;

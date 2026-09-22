@@ -15,6 +15,7 @@ import { PLATFORMS } from '@/constants/platforms';
 import { refreshInstagramMonitor, MONITOR_ID_KEY } from '@/lib/instagramMonitorApi';
 import { refreshRedditMonitor, REDDIT_MONITOR_ID_KEY } from '@/lib/redditMonitorApi';
 import { refreshFacebookMonitor, MONITOR_ID_KEY as FACEBOOK_MONITOR_ID_KEY } from '@/lib/facebookMonitorApi';
+import { fetchBrightDataProfile } from '@/lib/brightDataApi';
 
 const STORAGE_KEY = '@socialscraper/settings';
 const POSTS_KEY = '@socialscraper/posts';
@@ -29,6 +30,7 @@ const defaultSettings: AppSettings = {
     linkedin: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
     facebook: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
     instagram: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
+    tiktok: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
   },
   fetchFrequency: 'manual',
 };
@@ -711,13 +713,49 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
+      // ─── Bright Data platforms (Instagram, LinkedIn, TikTok, X, Facebook) ──
+      const brightDataPlatforms: PlatformId[] = ['instagram', 'linkedin', 'tiktok', 'x', 'facebook'];
+      const hasBrightDataSources = brightDataPlatforms.some(pid => {
+        const ps = s.platforms[pid];
+        return ps.fetchEnabled && ps.followedAccounts.length > 0;
+      });
+
+      if (hasBrightDataSources) {
+        try {
+          const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api';
+          const res = await fetch(`${apiUrl}/brightdata/feed?userId=local-user`);
+          if (res.ok) {
+            const data = await res.json();
+            const bdPosts: Post[] = (data.posts ?? []).map((p: any) => ({
+              id: `${p.platform}_${p.platformPostId}`,
+              platform: p.platform,
+              author: p.username,
+              authorHandle: `@${p.username}`,
+              content: p.text,
+              timestamp: p.publishedAt ?? new Date().toISOString(),
+              url: p.url,
+              likes: p.metrics?.likes,
+              comments: p.metrics?.comments,
+              reposts: p.metrics?.shares,
+              media: p.media?.map((m: any) => m.url),
+              mediaItems: p.media,
+              sourceKey: `${p.platform}:account:${p.username}`,
+              sourceLabel: `@${p.username}`,
+              sourceKind: 'account' as const,
+            }));
+            addFetchedPosts(bdPosts, 'instagram'); // platform already set per-post
+          } else {
+            fetchErrors.push(`Bright Data: HTTP ${res.status}`);
+          }
+        } catch (e) {
+          fetchErrors.push(`Bright Data: ${e instanceof Error ? e.message : 'fetch failed'}`);
+        }
+      }
+
+      // ─── Reddit (Apify) ──────────────────────────────────────────────────
       for (const [pid, pSettings] of Object.entries(s.platforms)) {
         if (!pSettings.fetchEnabled) continue;
         const platform = pid as PlatformId;
-
-        // Manual mode disables credentialed API access. Reddit still supports
-        // its public RSS feed, so it remains fetchable without credentials.
-        if (pSettings.useApi === false && platform === 'x') continue;
 
         if (platform === 'reddit') {
           try {
@@ -732,45 +770,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             addFetchedPosts(result.posts, platform);
           } catch (e) {
             fetchErrors.push(`Reddit: ${e instanceof Error ? e.message : String(e)}`);
-          }
-        } else if (platform === 'x') {
-          try {
-            const p = await fetchXPosts(pSettings.followedAccounts, pSettings.credentials);
-            addFetchedPosts(p, platform);
-          } catch (e) {
-            fetchErrors.push(e instanceof Error ? e.message : String(e));
-          }
-        } else if (platform === 'instagram') {
-          if (pSettings.followedAccounts.length > 0) {
-            try {
-              const monitorId = await AsyncStorage.getItem(MONITOR_ID_KEY);
-              const result = await refreshInstagramMonitor(pSettings.followedAccounts, monitorId ?? undefined);
-              addFetchedPosts(result.posts, platform);
-            } catch (e) {
-              fetchErrors.push(`Instagram: ${e instanceof Error ? e.message : 'fetch failed'}`);
-            }
-          }
-        } else if (platform === 'linkedin') {
-          if (pSettings.followedAccounts.length > 0) {
-            try {
-              const p = await fetchLinkedInPosts(pSettings.followedAccounts, pSettings.credentials);
-              if (p.length > 0) addFetchedPosts(p, platform);
-              else fetchErrors.push('LinkedIn: no posts returned. A valid session cookie may be required.');
-            } catch (e) {
-              fetchErrors.push(`LinkedIn: ${e instanceof Error ? e.message : 'fetch failed'}`);
-            }
-          }
-        } else if (platform === 'facebook') {
-          if (pSettings.followedAccounts.length > 0) {
-            try {
-              const monitorId = await AsyncStorage.getItem(FACEBOOK_MONITOR_ID_KEY);
-              const cookies = pSettings.credentials.cookies;
-              const result = await refreshFacebookMonitor(pSettings.followedAccounts, monitorId ?? undefined, false, cookies);
-              if (result.posts.length > 0) addFetchedPosts(result.posts, platform);
-              else fetchErrors.push('Facebook: no posts returned. A valid session cookie may be required.');
-            } catch (e) {
-              fetchErrors.push(`Facebook: ${e instanceof Error ? e.message : 'fetch failed'}`);
-            }
           }
         }
       }

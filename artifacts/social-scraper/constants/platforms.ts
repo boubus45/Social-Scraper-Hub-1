@@ -60,8 +60,19 @@ export const PLATFORMS: Record<PlatformId, PlatformDef> = {
     appScheme: 'instagram://',
     webUrl: 'https://instagram.com',
   },
+  tiktok: {
+    id: 'tiktok',
+    name: 'TikTok',
+    color: '#FFFFFF',
+    bgColor: '#000000',
+    charLimit: 2200,
+    hasApi: false,
+    icon: 'video',
+    description: 'Fetch TikTok profiles via Bright Data.',
+    webUrl: 'https://tiktok.com',
+  },
 };
 
 export const PLATFORM_LIST: PlatformDef[] = Object.values(PLATFORMS);
 
-export const ALL_PLATFORM_IDS: PlatformId[] = ['x', 'reddit', 'linkedin', 'facebook', 'instagram'];
+export const ALL_PLATFORM_IDS: PlatformId[] = ['x', 'reddit', 'linkedin', 'facebook', 'instagram', 'tiktok'];
