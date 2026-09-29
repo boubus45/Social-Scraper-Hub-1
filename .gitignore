@@ -49,13 +49,16 @@ Thumbs.db
 .local/
 .aider*
 memory.md
-artifacts/api-server/
 
 # Local backend secrets
 .env
 artifacts/api-server/.env
 artifacts/api-server/.env.*
 !artifacts/api-server/.env.example
+
+# Bright Data snapshot (used instead of Postgres when DATABASE_URL is unset)
+artifacts/api-server/.brightdata-state.json
+artifacts/api-server/.brightdata-state.json.tmp
 
 # Local Actor runtime storage
 actors/instagram-monitor/storage/

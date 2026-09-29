@@ -46,6 +46,7 @@ async function buildAll() {
       "dtrace-provider",
       "isolated-vm",
       "lightningcss",
+      "pg", // loads optional native bindings (pg-native) at runtime
       "pg-native",
       "oracledb",
       "mongodb-client-encryption",

@@ -1,10 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PlatformId, Post } from "@/types";
+import { API_BASE_URL } from "@/lib/apiConfig";
 
-const API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_URL
-  ?? "https://shiny-memory-7499jrvjj652xprv-3000.app.github.dev/api"
-).replace(/\/+$/, "").replace(/\/api$/, "");
 const MONITOR_ID_KEY = "@socialscraper/facebook-monitor-id";
 
 interface Record {

@@ -5,7 +5,11 @@
     "tsBuildInfoFile": ".tsbuildinfo",
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node"]
+    "types": ["node"],
+    // Lets relative imports keep their `.ts` extension so the same files can be
+    // loaded directly by `node --test` (type stripping). esbuild handles both.
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["src"],
   "references": [

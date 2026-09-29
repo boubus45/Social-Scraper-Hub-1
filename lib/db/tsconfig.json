@@ -4,6 +4,9 @@
     "composite": true,
     "declarationMap": true,
     "emitDeclarationOnly": true,
+    // Relative imports carry their `.ts` extension so `node --test` can load the
+    // schema directly (Node's ESM resolver does not search for extensions).
+    "allowImportingTsExtensions": true,
     "outDir": "dist",
     "rootDir": "src",
     "types": ["node"]

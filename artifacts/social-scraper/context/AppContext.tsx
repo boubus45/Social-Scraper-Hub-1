@@ -12,10 +12,9 @@ import {
 import { Alert } from 'react-native';
 import { PLATFORM_POSTERS, hasPostingCredentials, getRedditToken, PostResult } from '@/lib/platformPosters';
 import { PLATFORMS } from '@/constants/platforms';
-import { refreshInstagramMonitor, MONITOR_ID_KEY } from '@/lib/instagramMonitorApi';
 import { refreshRedditMonitor, REDDIT_MONITOR_ID_KEY } from '@/lib/redditMonitorApi';
-import { refreshFacebookMonitor, MONITOR_ID_KEY as FACEBOOK_MONITOR_ID_KEY } from '@/lib/facebookMonitorApi';
-import { fetchBrightDataProfile } from '@/lib/brightDataApi';
+import { BRIGHT_DATA_PLATFORMS, fetchBrightDataFeed, syncBrightDataSources } from '@/lib/brightDataApi';
+import { API_BASE_URL } from '@/lib/apiConfig';
 
 const STORAGE_KEY = '@socialscraper/settings';
 const POSTS_KEY = '@socialscraper/posts';
@@ -32,7 +31,6 @@ const defaultSettings: AppSettings = {
     instagram: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
     tiktok: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
   },
-  fetchFrequency: 'manual',
 };
 
 function generateId(): string {
@@ -661,13 +659,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 followedAccounts: migratedRedditSources,
               };
             }
-            return { ...prev, ...parsed, platforms: mergedPlatforms };
+            // `fetchFrequency` was removed — the backend collects hourly, so the
+            // interval control went with it. Drop any stored copy rather than
+            // carrying a dead setting around.
+            const stored = { ...(parsed as AppSettings & { fetchFrequency?: string }) };
+            delete stored.fetchFrequency;
+            return { ...prev, ...stored, platforms: mergedPlatforms };
           });
         }
         const postsRaw = await AsyncStorage.getItem(POSTS_KEY);
         if (postsRaw) {
           const saved: Post[] = JSON.parse(postsRaw);
-          if (saved.length > 0) setPosts(saved.map(post => ({ ...post, isNew: false })));
+          // `isNew` is deliberately preserved: it marks what the last fetch
+          // brought in, which is what the default "New" feed view is built on.
+          if (saved.length > 0) setPosts(saved);
         }
         const draftsRaw = await AsyncStorage.getItem(DRAFTS_KEY);
         if (draftsRaw) setDrafts(JSON.parse(draftsRaw));
@@ -714,39 +719,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     try {
       // ─── Bright Data platforms (Instagram, LinkedIn, TikTok, X, Facebook) ──
-      const brightDataPlatforms: PlatformId[] = ['instagram', 'linkedin', 'tiktok', 'x', 'facebook'];
-      const hasBrightDataSources = brightDataPlatforms.some(pid => {
+      // Accounts configured in Settings must exist as backend subscriptions:
+      // the feed only returns posts for subscribed sources, so sync first.
+      const wantedSources: Array<{ platform: PlatformId; username: string }> = [];
+      for (const pid of BRIGHT_DATA_PLATFORMS) {
         const ps = s.platforms[pid];
-        return ps.fetchEnabled && ps.followedAccounts.length > 0;
-      });
+        if (!ps?.fetchEnabled) continue;
+        for (const account of ps.followedAccounts) {
+          const username = account.trim().replace(/^[@/]/, '').split('/')[0] ?? '';
+          if (username) wantedSources.push({ platform: pid, username });
+        }
+      }
 
-      if (hasBrightDataSources) {
+      if (wantedSources.length > 0) {
         try {
-          const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api';
-          const res = await fetch(`${apiUrl}/brightdata/feed?userId=local-user`);
-          if (res.ok) {
-            const data = await res.json();
-            const bdPosts: Post[] = (data.posts ?? []).map((p: any) => ({
-              id: `${p.platform}_${p.platformPostId}`,
-              platform: p.platform,
-              author: p.username,
-              authorHandle: `@${p.username}`,
-              content: p.text,
-              timestamp: p.publishedAt ?? new Date().toISOString(),
-              url: p.url,
-              likes: p.metrics?.likes,
-              comments: p.metrics?.comments,
-              reposts: p.metrics?.shares,
-              media: p.media?.map((m: any) => m.url),
-              mediaItems: p.media,
-              sourceKey: `${p.platform}:account:${p.username}`,
-              sourceLabel: `@${p.username}`,
-              sourceKind: 'account' as const,
-            }));
-            addFetchedPosts(bdPosts, 'instagram'); // platform already set per-post
-          } else {
-            fetchErrors.push(`Bright Data: HTTP ${res.status}`);
-          }
+          const sync = await syncBrightDataSources(wantedSources);
+          for (const warning of sync.warnings) fetchErrors.push(`Bright Data: ${warning}`);
+        } catch (e) {
+          fetchErrors.push(`Bright Data: ${e instanceof Error ? e.message : 'subscribe failed'}`);
+        }
+
+        try {
+          const bdPosts = await fetchBrightDataFeed();
+          allPosts.push(...bdPosts);
         } catch (e) {
           fetchErrors.push(`Bright Data: ${e instanceof Error ? e.message : 'fetch failed'}`);
         }
@@ -843,20 +838,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const intervals: Record<AppSettings['fetchFrequency'], number | undefined> = {
-      manual: undefined,
-      '15min': 15 * 60 * 1000,
-      '30min': 30 * 60 * 1000,
-      '1h': 60 * 60 * 1000,
-      '6h': 6 * 60 * 60 * 1000,
-    };
-    const interval = intervals[settings.fetchFrequency];
-    if (!interval) return;
+    // The backend collects every hour, so the app syncs on the same cadence —
+    // this used to be configurable in Settings, which no longer makes sense.
     const timer = setInterval(() => {
       void fetchPosts();
-    }, interval);
+    }, 60 * 60 * 1000);
     return () => clearInterval(timer);
-  }, [fetchPosts, settings.fetchFrequency]);
+  }, [fetchPosts]);
 
   const startCompose = useCallback((post?: Post) => {
     setComposedPost({
@@ -899,7 +887,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ─── Scheduler ────────────────────────────────────────────────────────────
   const postToPlatformViaBackend = useCallback(async (pid: string, content: string, subreddit?: string) => {
     try {
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api'}/post/${pid}`, {
+      const res = await fetch(`${API_BASE_URL}/post/${pid}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content, userId: 'local-user', subreddit }),

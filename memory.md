@@ -397,72 +397,80 @@ pnpm codegen                # Generate API types/client
 
 ---
 
-## Bright Data Integration (2026-09-22)
+## Bright Data Integration (updated 2026-09-29)
 
 ### Architecture
-- **Backend cron**: Hourly collection for Instagram, LinkedIn, TikTok via `/datasets/v3/trigger`
-- **DCA Collectors**: X, Facebook use recurring collectors (configured in Bright Data dashboard)
-- **Apify**: Reddit (no Bright Data dataset exists)
-- **Centralized sources**: Same account scraped once, distributed to all subscribers
-- **Event-driven**: Webhook ingestion → deduplicate → store → notify subscribers
-- **Feed refresh NEVER triggers scraping** — only polls local DB
+- **Backend loop**: hourly collection + `POST /api/brightdata/collect/:platform/:username` on demand; both wait for Bright Data's snapshot (`/datasets/v3/snapshot/{id}`) or DCA dataset (`/dca/dataset?id=j_*`) rather than trusting delivery.
+- **Centralized sources**: one scrape per account, shared by every subscriber; subscribe/unsubscribe just moves a counter (`status` flips to `paused` at 0 subscribers).
+- **Feed never scrapes**: the frontend only reads `GET /api/brightdata/feed`.
+- **Webhooks now reachable**: port 3000 was opened with `gh codespace ports visibility 3000:public -c <codespace>` (a private port 302s to the GitHub sign-in page, which is why deliveries used to bounce). Verified live through the public URL: no secret → 401, `?secret=` → 200, and a real Bright Data delivery landed right after an Instagram collect. Polling snapshots stays the primary path; the webhook runs in parallel and is deduped, so both can deliver the same batch safely.
+- **Apify**: Reddit (no Bright Data dataset exists).
 
-### Platform Datasets
+### Platform Datasets (all verified live against the API)
 
-| Platform | Dataset ID | Method | On-Demand | Recurring |
-|----------|-----------|--------|-----------|-----------|
-| Instagram | `gd_l1vikfch901nx3by4` | Backend cron | ✅ | ✅ |
-| LinkedIn | `gd_l1viktl72bvl7bjuj0` | Backend cron | ✅ | ✅ |
-| TikTok | `gd_l1villgoiiidt09ci` | Backend cron | ✅ | ✅ |
-| X | `gd_lhqdbl2k1adkkc5tss` | DCA collector | ❌ | ✅ (dashboard) |
-| Facebook | `gd_lfqk7jkk2582box2zn` | DCA collector | ❌ | ✅ (dashboard) |
-| Reddit | *none* | Apify actor | N/A | N/A |
+| Platform | Target | Method | Trigger verified |
+|----------|--------|--------|------------------|
+| Instagram | `gd_l1vikfch901nx3by4` | dataset `/datasets/v3/trigger` | ✅ (12 posts) |
+| LinkedIn | `gd_l1viktl72bvl7bjuj0` | dataset | ✅ |
+| TikTok | `gd_l1villgoiiidt09ci` | dataset | ✅ |
+| Facebook | `gd_lkaxegm826bjpoo9m5` | dataset | ✅ (old `gd_lfqk7jkk2582box2zn` rejects `/trigger`) |
+| X | `c_mumyczdc14w602ck3i` | Scraper Studio scraper (DCA) | ✅ (20 unique posts / 38s) |
+| Reddit | *none* | Apify actor | N/A |
 
-### Key Files
-- `artifacts/api-server/src/services/brightDataCollection.ts` — unified collection manager
-- `artifacts/api-server/src/services/brightDataDatasets.ts` — dataset configurations per platform
-- `artifacts/api-server/src/routes/brightData.ts` — REST API + webhook endpoint
-- `artifacts/api-server/src/services/brightDataUnified.ts` — on-demand profile fetch + normalizer
-- `artifacts/api-server/src/services/brightDataProvider.ts` — legacy provider (superseded by collection manager)
+- X: no marketplace dataset accepts a profile URL — `gd_lhqdbl2k1adkkc5tss` answers "does not support collection", `gd_lwxkxvnf1cynvib9co` wants single status URLs. Hence the scraper, created via API:
+  1. `POST /dca/collector` → `c_mumyczdc14w602ck3i` ("social-x-profile-posts")
+  2. `POST /dca/collectors/{id}/automate_template` (AI flow, status `preview_picker` → `done`)
+  3. `POST /dca/trigger?collector={id}` with `[{"url":"https://x.com/NASA"}]` → `collection_id` = `j_*`
+  - **`queue_next=1` must be omitted** — trial collectors reject queued jobs.
+- Bright Data MCP (`https://mcp.brightdata.com/sse?token=…&groups=advanced_scraping,social`) is configured in `.mcp.json`. It exposes only `ask_brightdata_assistant` (Q&A, times out), `search_engine`, `scrape_as_markdown`, `search_engine_batch`, `scrape_batch` — no scraper-creation tool, so creation went through the REST API above.
 
-### Endpoints
-- `POST /api/webhooks/brightdata` — receives Bright Data webhook payloads
-- `POST /api/sources` — subscribe to a platform account
-- `DELETE /api/sources/:platform/:username` — unsubscribe
-- `GET /api/sources` — list user's subscriptions
-- `GET /api/sources/all` — list all sources (admin/debug)
-- `GET /api/feed` — get aggregated feed from all subscriptions
-- `GET /api/profile/:platform?username=X` — on-demand profile fetch
-- `GET /api/platforms` — list supported platforms
-- `GET /api/status` — check if Bright Data is configured
-- `POST /api/collect/:platform/:username` — manual collection trigger (testing)
+### Key Files (`artifacts/api-server/src`)
+- `services/brightDataCollection.ts` — subscription/collection manager, dedup, persistence hooks
+- `services/brightDataNormalize.ts` — the one normalizer both ingest paths use
+- `services/brightDataHttp.ts` — auth + `parseDatasetPayload` (array / object / concatenated docs / not-ready sentinels)
+- `services/brightDataDatasets.ts` — dataset ids, `scraperId`, `supportsOnDemand`
+- `services/brightDataStore.ts` — Postgres or JSON-snapshot persistence
+- `services/brightDataUnified.ts` — on-demand profile fetch (IG/LI/TT)
+- `routes/brightData.ts` — REST + `webhookRouter`
+- `*.test.ts` — 29 tests (`pnpm test`, `node --test src/services/*.test.ts`)
 
-### Collection Loop
-- Backend runs `setInterval` every hour
-- Iterates all active sources with subscribers
-- For on-demand platforms: triggers `/datasets/v3/trigger` with webhook delivery
-- For recurring-only platforms: creates DCA collector, fetches latest snapshot
-- Posts are normalized, deduplicated, stored in-memory
+### Endpoints (prefix matters — everything is mounted under `/api/brightdata`)
+- `POST /api/webhooks/brightdata` — webhook (kept outside the prefix because `BRIGHTDATA_WEBHOOK_URL` hardcodes it)
+- `POST /api/brightdata/sources` · `DELETE /api/brightdata/sources/:platform/:username` · `GET /api/brightdata/sources?userId=`
+- `GET /api/brightdata/sources/all` · `GET /api/brightdata/feed?userId=`
+- `GET /api/brightdata/profile/:platform?username=` · `GET /api/brightdata/platforms` · `GET /api/brightdata/status`
+- `POST /api/brightdata/collect/:platform/:username` → `{ ok, postsCollected }` (`postsCollected` = posts actually added, not raw records — Bright Data paginates and duplicates)
 
-### Deduplication
-- By `platformPostId` (unique per platform)
-- By URL (normalized)
-- Temporal: skips posts older than last ingested post
+### Normalization rules (learned from live payloads)
+- Two shapes: **nested** profile records (`posts` for IG/LI/X, `top_posts_data` for TikTok) vs **flat** post records (Facebook). A record owning the key but with `[]` means "profile with no posts", not a post.
+- X scraper returns `{posts:[{post_url, post_text, author_handle, posted_date, reply_count, repost_count, like_count, view_count, media_image_url, author_profile_image}]}` — handle comes from the *post*, not the wrapper; `author_profile_image` is an avatar and is dropped.
+- X id = the numeric status id (stable across scrapes); URLs are stripped of `/photo/1`.
+- X dates are UI strings (`"8:31 PM · Sep 25, 2026"`, `"Sep 25"`) → parsed to ISO; when `posted_date` is empty (retweets) the timestamp is recovered from the snowflake id (`(id >> 22) + 1288834974657`).
+- Only classifiable media is kept, so `tiktok.com/@u/video/…` page links never become a broken player.
+- LinkedIn `interaction` (`"2,530 - 139 Comments"`) → likes/comments; TikTok joins `top_videos` on `post_id == video_id` for cover + counts.
+- Records without an id are skipped instead of collapsing into one shared `"undefined"` post.
 
-### DCA Collectors (X, Facebook)
-- Created via `POST /dca/collector` API with webhook delivery
-- Schedule and inputs must be configured in Bright Data dashboard (no API for scheduling)
-- URL: https://brightdata.com/dashboard
+### Persistence
+- `DATABASE_URL` set → Postgres (`social_sources`, `subscriptions`, `posts`, created with `pnpm run push` in `lib/db`); otherwise an atomic JSON snapshot at `BRIGHTDATA_STATE_FILE` (default `.brightdata-state.json`, gitignored).
+- Restored on boot before the server listens, debounced (1s) writes on every mutation, explicit flush on SIGINT/SIGTERM. Cap: 200 newest posts per source.
+- `lib/db/src/schema/social.ts` is now the live Drizzle schema (was commented out).
+- Local dev DB provisioned for testing: PostgreSQL 17, role `app`, db `scraperhub`, `DATABASE_URL` in the gitignored `.env`.
+- The Postgres test snapshots and restores existing rows, so running the suite never wipes a live feed.
 
-### Configuration (`.env`)
-- `BRIGHTDATA_API_TOKEN` — API token
-- `BRIGHTDATA_WEBHOOK_URL` — public HTTPS webhook URL
-- `BRIGHTDATA_WEBHOOK_SECRET` (optional) — for webhook validation
+### Webhook auth
+`BRIGHTDATA_WEBHOOK_SECRET` in `.env` (`openssl rand -hex 24`) accepted three ways: `Authorization: Bearer <secret>`, `x-webhook-secret` header, or `?secret=` on the delivery URL. Body may be an array or a scraper-style `{posts:[…]}`; empty batches count as `skipped`, not errors. `getWebhookUrl` appends `?source_id=…&dataset_id=…&secret=…` to every trigger's `endpoint=`, and deliveries are logged as `[BrightData] Webhook delivery source=… ingested=… duplicates=…`.
 
-### Typecheck/Build Status
-- `pnpm run typecheck` ✅ passes
-- `pnpm run build` ✅ passes (api-server)
+### Feed UI (`artifacts/social-scraper`)
+- Filter chips: **New (default)** → only the posts each platform's *last fetch* brought in, grouped by platform, and platforms with nothing new are omitted entirely; **All** → the original "everything, separated by platform" view; then one chip per enabled platform (with a colored dot when that platform has new posts).
+- Platform sections are ordered by each platform's freshest post rather than the fixed platform list, so the newest platform is never below the scroll.
+- `isNew` is set during merge (only ids the previous fetch had not seen) and now **persists across restarts** — hydration used to clear it, which would have emptied the default view after an app relaunch.
+- Settings' "Auto-fetch frequency" is gone (`FetchFrequency` / `FETCH_FREQUENCY_LABELS` / `AppSettings.fetchFrequency` deleted; hydration drops any stored copy). The backend collects hourly, so the app syncs on a fixed 60-minute timer and Settings shows an explanatory hint instead of a control.
+- A newly subscribed source fires an immediate collect for **every** Bright Data platform (X and Facebook included now that X runs the scraper and FB's dataset accepts `/trigger`).
 
-### Recent Commits
-- `ec77020` — initial Bright Data integration (webhook-driven)
-- (no push yet — implementing per-platform collection)
+### Config (`.env`, see `.env.example`)
+`BRIGHTDATA_API_TOKEN`, `BRIGHTDATA_WEBHOOK_URL`, `BRIGHTDATA_WEBHOOK_SECRET`, `DATABASE_URL`, `BRIGHTDATA_STATE_FILE`.
+
+### Status
+- `pnpm run typecheck` ✅ (4 projects) · `pnpm test` ✅ 29/29 with `DATABASE_URL` (28/29 without — the Postgres case skips) · api-server `pnpm build` ✅ · the Expo app bundles on Metro ✅ (1749 modules, no desktop browser attached for a visual pass)
+- Live E2E ✅: subscribe → collect → feed for X + Instagram (32 posts, 2 sources), restart restores the feed from Postgres, SIGTERM flushes and releases the port, public webhook answers 401/200 correctly and received a real Bright Data delivery.
+- The whole Bright Data + feed-UI effort lands as **one squashed commit** on top of `b85b9b1`, so the push starts a single APK build.

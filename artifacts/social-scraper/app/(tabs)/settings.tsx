@@ -21,7 +21,8 @@ import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
 import PlatformBadge from '@/components/PlatformBadge';
 import { PLATFORM_LIST } from '@/constants/platforms';
-import { FETCH_FREQUENCY_LABELS, FetchFrequency, PlatformCredentials, PlatformId } from '@/types';
+import { PlatformCredentials, PlatformId } from '@/types';
+import { API_BASE_URL } from '@/lib/apiConfig';
 
 // OAuth configuration for each platform
 const OAUTH_CONFIG: Record<PlatformId, {
@@ -154,11 +155,6 @@ async function handleOAuthLogin(platform: PlatformId): Promise<void> {
   }
 }
 
-const API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_URL
-  ?? "https://shiny-memory-7499jrvjj652xprv-3000.app.github.dev/api"
-).replace(/\/+$/, "").replace(/\/api$/, "");
-
 function hasOAuthCredentials(platform: PlatformId, credentials: PlatformCredentials): boolean {
   // This is now a fallback for manual credential mode.
   // Primary connection state comes from the backend OAuth store.
@@ -213,8 +209,6 @@ export default function SettingsScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   };
-
-  const frequencies: FetchFrequency[] = ['manual', '15min', '30min', '1h', '6h'];
 
   return (
     <ScrollView
@@ -395,26 +389,11 @@ export default function SettingsScreen() {
       {/* ── Preferences ── */}
       <SectionHeader title="Preferences" icon="sliders" />
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Auto-fetch frequency</Text>
-        <View style={styles.chipRow}>
-          {frequencies.map(f => (
-            <TouchableOpacity
-              key={f}
-              onPress={() => updateSettings({ fetchFrequency: f })}
-              style={[
-                styles.optionChip,
-                {
-                  backgroundColor: settings.fetchFrequency === f ? colors.primary : colors.secondary,
-                  borderColor: settings.fetchFrequency === f ? colors.primary : colors.border,
-                },
-              ]}
-            >
-              <Text style={[styles.optionChipText, { color: settings.fetchFrequency === f ? '#FFF' : colors.mutedForeground }]}>
-                {FETCH_FREQUENCY_LABELS[f]}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Feed refresh</Text>
+        <Text style={[styles.hint, { color: colors.mutedForeground }]}>
+          Posts are collected by the backend every hour — no interval to configure. Pull the feed
+          down to pick up what has arrived since.
+        </Text>
       </View>
     </ScrollView>
   );
@@ -783,14 +762,6 @@ const styles = StyleSheet.create({
   },
   eyeBtn: { padding: 4 },
   hint: { fontSize: 11, fontFamily: 'Inter_400Regular' },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  optionChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  optionChipText: { fontSize: 13, fontFamily: 'Inter_500Medium' },
   divider: { height: 1, marginVertical: 4 },
   avatarRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   avatarContainer: {

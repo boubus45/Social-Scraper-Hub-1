@@ -61,21 +61,10 @@ export interface AISettings {
   apiKey: string;
 }
 
-export type FetchFrequency = 'manual' | '15min' | '30min' | '1h' | '6h';
-
-export const FETCH_FREQUENCY_LABELS: Record<FetchFrequency, string> = {
-  manual: 'Manual only',
-  '15min': 'Every 15 minutes',
-  '30min': 'Every 30 minutes',
-  '1h': 'Every hour',
-  '6h': 'Every 6 hours',
-};
-
 export interface AppSettings {
   profile: Profile;
   ai: AISettings;
   platforms: Record<PlatformId, PlatformSettings>;
-  fetchFrequency: FetchFrequency;
 }
 
 export interface Post {

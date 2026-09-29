@@ -5,7 +5,7 @@ import redditMonitorsRouter from "./redditMonitors";
 import facebookMonitorsRouter from "./facebookMonitors";
 import oauthRouter from "./oauth";
 import postRouter from "./post";
-import brightDataRouter from "./brightData";
+import brightDataRouter, { webhookRouter } from "./brightData";
 
 const router: IRouter = Router();
 
@@ -15,6 +15,9 @@ router.use(redditMonitorsRouter);
 router.use(facebookMonitorsRouter);
 router.use(oauthRouter);
 router.use(postRouter);
-router.use(brightDataRouter);
+// Bright Data lives under /api/brightdata/… — the webhook path is fixed by
+// BRIGHTDATA_WEBHOOK_URL, so it is mounted separately.
+router.use("/webhooks", webhookRouter);
+router.use("/brightdata", brightDataRouter);
 
 export default router;
