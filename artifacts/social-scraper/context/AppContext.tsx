@@ -9,12 +9,18 @@ import {
   PlatformId,
   Post,
 } from '@/types';
-import { Alert } from 'react-native';
+import { Alert, AppState } from 'react-native';
 import { PLATFORM_POSTERS, hasPostingCredentials, getRedditToken, PostResult } from '@/lib/platformPosters';
 import { PLATFORMS } from '@/constants/platforms';
 import { refreshRedditMonitor, REDDIT_MONITOR_ID_KEY } from '@/lib/redditMonitorApi';
 import { BRIGHT_DATA_PLATFORMS, fetchBrightDataFeed, syncBrightDataSources } from '@/lib/brightDataApi';
+import { notifyNewPosts, onNotificationOpened } from '@/lib/notifications';
 import { API_BASE_URL } from '@/lib/apiConfig';
+
+/** The next fetch is scheduled this long after every fetch that finishes. */
+const REFRESH_DELAY_MS = 5 * 60 * 1000;
+/** Foreground refreshes are throttled so tab switching can't spam the backend. */
+const MIN_REFRESH_GAP_MS = 60 * 1000;
 
 const STORAGE_KEY = '@socialscraper/settings';
 const POSTS_KEY = '@socialscraper/posts';
@@ -622,6 +628,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isFetchingPosts, setIsFetchingPosts] = useState(false);
   const [isRephrasing, setIsRephrasing] = useState(false);
   const [lastFetchError, setLastFetchError] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -631,6 +638,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   composedPostRef.current = composedPost;
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
+
+  // A fetch schedules its own successor, so the cadence is:
+  // fetch → 5 minutes → fetch → … Manual refreshes and foreground returns
+  // simply reset that same timer instead of stacking a second one.
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fetchInFlightRef = useRef(false);
+  const lastFetchAtRef = useRef(0);
+  const fetchPostsRef = useRef<() => Promise<void>>(async () => {});
+
+  const scheduleNextFetch = useCallback((delayMs: number) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      void fetchPostsRef.current();
+    }, delayMs);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -677,6 +700,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const draftsRaw = await AsyncStorage.getItem(DRAFTS_KEY);
         if (draftsRaw) setDrafts(JSON.parse(draftsRaw));
       } catch { /* ignore hydration errors */ }
+      finally { setHydrated(true); }
     })();
   }, []);
 
@@ -703,6 +727,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [saveSettings]);
 
   const fetchPosts = useCallback(async () => {
+    if (fetchInFlightRef.current) return; // never stack two refreshes
+    fetchInFlightRef.current = true;
+    lastFetchAtRef.current = Date.now();
     setIsFetchingPosts(true);
     setLastFetchError(null);
     const s = settingsRef.current;
@@ -810,14 +837,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
         setPosts(nextPosts);
         await AsyncStorage.setItem(POSTS_KEY, JSON.stringify(nextPosts));
+        // IDs this device had never seen = the new posts worth announcing.
+        const discovered = allPosts.filter(post => !knownIds.has(post.id));
+        if (discovered.length > 0) void notifyNewPosts(discovered);
         if (fetchErrors.length > 0) setLastFetchError(fetchErrors.join('\n'));
       }
     } catch (e: unknown) {
       setLastFetchError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
+      fetchInFlightRef.current = false;
       setIsFetchingPosts(false);
+      // Chain the next refresh: five minutes from now, success or failure.
+      scheduleNextFetch(REFRESH_DELAY_MS);
     }
-  }, []);
+  }, [scheduleNextFetch]);
 
   const postNow = useCallback(async (
     platform: PlatformId,
@@ -837,14 +870,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return poster(content, platformSettings.credentials, extra);
   }, []);
 
+  // ─── Refresh loop ────────────────────────────────────────────────────────
+  // fetchPosts schedules its own successor (5 minutes later); these effects
+  // only start the chain, restart it after a cold launch, and pick the app up
+  // when it comes back to the foreground.
   useEffect(() => {
-    // The backend collects every hour, so the app syncs on the same cadence —
-    // this used to be configurable in Settings, which no longer makes sense.
-    const timer = setInterval(() => {
-      void fetchPosts();
-    }, 60 * 60 * 1000);
-    return () => clearInterval(timer);
+    fetchPostsRef.current = fetchPosts;
   }, [fetchPosts]);
+
+  useEffect(() => {
+    if (!hydrated) return; // wait until the stored feed has been restored
+    void fetchPosts();
+  }, [hydrated, fetchPosts]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state !== 'active' || fetchInFlightRef.current) return;
+      if (Date.now() - lastFetchAtRef.current < MIN_REFRESH_GAP_MS) return;
+      void fetchPosts();
+    });
+    return () => subscription.remove();
+  }, [fetchPosts]);
+
+  // Tapping a "new post" notification opens the Feed.
+  useEffect(() => {
+    const subscription = onNotificationOpened();
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+  }, []);
 
   const startCompose = useCallback((post?: Post) => {
     setComposedPost({

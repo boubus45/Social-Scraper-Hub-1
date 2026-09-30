@@ -12,6 +12,10 @@ import {
   getSubscribedSources,
   getUserFeed,
   ingestWebhookPayload,
+  isSourceDue,
+  COLLECTION_INTERVAL_MS,
+  initBrightDataCollection,
+  flushState,
   posts,
 } from "./brightDataCollection.ts";
 import { getDatasetForPlatform } from "./brightDataDatasets.ts";
@@ -76,6 +80,32 @@ test("unsubscribe decrements the counter and pauses an unsubscriber source", () 
 test("Reddit has no Bright Data dataset", () => {
   assert.equal(getDatasetForPlatform("reddit"), undefined);
   assert.throws(() => subscribeToSource(userId(), "reddit", "some_sub"), /No Bright Data dataset/);
+});
+
+// The hourly loop and the post-boot catch-up both filter through this, so a
+// restarted process (sleeping free-tier hosts) never pays for a duplicate scrape.
+test("a source is due again only after a full collection interval", () => {
+  const source = subscribeToSource(userId(), "instagram", `ig_user_${suffix()}`);
+  assert.equal(isSourceDue(source), true, "never collected → due immediately");
+
+  const collectedAt = Date.now();
+  source.lastCollectedAt = new Date(collectedAt).toISOString();
+  assert.equal(isSourceDue(source), false, "just collected → skipped");
+  assert.equal(
+    isSourceDue(source, collectedAt + COLLECTION_INTERVAL_MS - 1000),
+    false,
+    "interval not elapsed yet → still skipped",
+  );
+  assert.equal(
+    isSourceDue(source, collectedAt + COLLECTION_INTERVAL_MS),
+    true,
+    "interval elapsed → due again",
+  );
+  assert.equal(
+    isSourceDue({ ...source, lastCollectedAt: "not-a-date" }),
+    true,
+    "corrupt timestamp → try rather than stall forever",
+  );
 });
 
 test("webhook ingestion dedups by platform post id and by URL", async () => {
@@ -245,4 +275,21 @@ test("getUserFeed never leaks posts from another user's subscriptions", () => {
 
   assert.equal(getUserFeed(mine).some(p => p.platformPostId === "hidden"), false);
   assert.ok(mySource.id !== theirSource.id);
+});
+
+// Must stay the last test in this file: init runs once per process.
+// A boot whose load fails used to flush its empty state on shutdown and erase
+// a healthy database — this guards exactly that path.
+test("a failed initial load never lets an empty state overwrite the database", async () => {
+  const previous = process.env.DATABASE_URL;
+  // Unreachable on purpose: bootstrap has to survive it.
+  process.env.DATABASE_URL = "postgresql://app:app@127.0.0.1:1/unreachable";
+  try {
+    await initBrightDataCollection(); // resolves even though loading failed
+    await flushState(); // skips the write instead of wiping rows
+    assert.ok(true);
+  } finally {
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
 });

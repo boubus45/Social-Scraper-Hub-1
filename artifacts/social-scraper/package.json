@@ -61,6 +61,7 @@
   "dependencies": {
     "expo-av": "~16.0.7",
     "expo-clipboard": "~8.0.8",
+    "expo-notifications": "~0.32.17",
     "expo-screen-orientation": "~9.0.7"
   }
 }

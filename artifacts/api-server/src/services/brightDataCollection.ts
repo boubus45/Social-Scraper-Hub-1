@@ -37,6 +37,11 @@ export interface CollectionResult {
 // ─── Configuration ──────────────────────────────────────────────────────
 
 const COLLECTION_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+export { COLLECTION_INTERVAL_MS };
+// Restarts happen on every host that sleeps (free tiers do). Without a
+// catch-up pass a woken process would idle for a whole interval before
+// collecting anything, so the first pass runs shortly after boot instead.
+const BOOT_CATCHUP_DELAY_MS = 15 * 1000;
 const SAVE_DEBOUNCE_MS = 1000;
 // Bounds both memory and the persisted state; the feed only ever reads the
 // newest posts anyway.
@@ -52,6 +57,10 @@ let collectionTimer: NodeJS.Timeout | undefined;
 // Persistence: Postgres when DATABASE_URL is set, otherwise a JSON snapshot.
 // Undefined until init runs, which also keeps tests (never initialised) working.
 let store: StateStore | undefined;
+// Set when the very first load fails (database briefly unreachable). Writing
+// our empty in-memory state back would erase a healthy database, so once this
+// is set persistence stays off for the life of the process.
+let persistenceBlocked = false;
 let initPromise: Promise<void> | undefined;
 let saveTimer: NodeJS.Timeout | undefined;
 
@@ -77,11 +86,23 @@ async function bootstrap(): Promise<void> {
   } catch (error) {
     // Losing persisted state must not stop the server from serving what it has.
     console.error('[BrightData] Failed to load persisted state:', error);
+    // …but the reverse must not happen either: an empty process flushing on
+    // shutdown would wipe rows it never managed to read.
+    persistenceBlocked = true;
+    console.error(
+      '[BrightData] Persistence disabled for this run: writing now would replace ' +
+        'a healthy database with an empty state. Fix the connection and restart.',
+    );
   }
 
   if (isConfigured()) {
     console.log('[BrightData] Collection manager initialized');
     startCollectionLoop();
+    // Collect whatever is due as soon as the process is up: sources gathered
+    // less than an interval ago are skipped by isSourceDue, so this never
+    // double-pays for a scrape.
+    const catchUp = setTimeout(() => { void runScheduledCollections(); }, BOOT_CATCHUP_DELAY_MS);
+    catchUp.unref?.();
   } else {
     console.warn('[BrightData] BRIGHTDATA_API_TOKEN not set — collection disabled');
   }
@@ -131,6 +152,13 @@ export async function flushState(): Promise<void> {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = undefined;
+  }
+  if (persistenceBlocked) {
+    console.warn(
+      '[BrightData] Skipping write: the initial load failed, so this process never ' +
+        'saw what is already stored. Writing would erase it.',
+    );
+    return;
   }
   try {
     await store.save(snapshotState());
@@ -230,6 +258,19 @@ export function getAllSources(): CollectionSource[] {
 
 // ─── Collection Loop ──────────────────────────────────────────────────
 
+/**
+ * A source should be collected when it never has been, or when its last
+ * successful collection is at least one interval old. Restarting the process,
+ * an on-demand run, or a webhook delivery all push `lastCollectedAt` forward,
+ * so nothing pays twice for the same scrape.
+ */
+export function isSourceDue(source: CollectionSource, now = Date.now()): boolean {
+  if (!source.lastCollectedAt) return true;
+  const last = new Date(source.lastCollectedAt).getTime();
+  if (Number.isNaN(last)) return true; // corrupt timestamp → better to try
+  return now - last >= COLLECTION_INTERVAL_MS;
+}
+
 function startCollectionLoop(): void {
   if (collectionTimer) clearInterval(collectionTimer);
   collectionTimer = setInterval(() => {
@@ -248,13 +289,17 @@ export function stopCollectionLoop(): void {
 async function runScheduledCollections(): Promise<void> {
   if (!isConfigured()) return;
 
+  const now = Date.now();
   const activeSources = [...sources.values()].filter(
     s => s.status === 'active' && s.subscriberCount > 0
   );
+  const dueSources = activeSources.filter(s => isSourceDue(s, now));
 
-  console.log(`[BrightData] Running scheduled collection for ${activeSources.length} sources`);
+  console.log(
+    `[BrightData] Running scheduled collection for ${dueSources.length}/${activeSources.length} sources`,
+  );
 
-  for (const source of activeSources) {
+  for (const source of dueSources) {
     try {
       await collectFromSource(source);
     } catch (err) {

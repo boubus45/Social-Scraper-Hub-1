@@ -401,9 +401,11 @@ pnpm codegen                # Generate API types/client
 
 ### Architecture
 - **Backend loop**: hourly collection + `POST /api/brightdata/collect/:platform/:username` on demand; both wait for Bright Data's snapshot (`/datasets/v3/snapshot/{id}`) or DCA dataset (`/dca/dataset?id=j_*`) rather than trusting delivery.
+- **Restart catch-up**: `isSourceDue` gates every scheduled pass — the hourly tick *and* a pass 15 s after boot — so a process woken on a sleeping host collects what's overdue instead of idling for a full interval, and never pays twice for a scrape gathered less than an interval ago.
+- **Persistence guard**: when the very first state load fails, `flushState` refuses to write. An empty process flushing on shutdown used to wipe a healthy Postgres (it actually happened once — the feed was rebuilt from scratch); losing this run's writes beats erasing what is stored.
 - **Centralized sources**: one scrape per account, shared by every subscriber; subscribe/unsubscribe just moves a counter (`status` flips to `paused` at 0 subscribers).
 - **Feed never scrapes**: the frontend only reads `GET /api/brightdata/feed`.
-- **Webhooks now reachable**: port 3000 was opened with `gh codespace ports visibility 3000:public -c <codespace>` (a private port 302s to the GitHub sign-in page, which is why deliveries used to bounce). Verified live through the public URL: no secret → 401, `?secret=` → 200, and a real Bright Data delivery landed right after an Instagram collect. Polling snapshots stays the primary path; the webhook runs in parallel and is deduped, so both can deliver the same batch safely.
+- **Webhooks now reachable**: port 3000 was opened with `gh codespace ports visibility 3000:public -c <codespace>` (a private port 302s to the GitHub sign-in page, which is why deliveries used to bounce). **Visibility reverts to private whenever the codespace restarts** — re-run that command after every wake. Verified live through the public URL: no secret → 401, `?secret=` → 200, and a real Bright Data delivery landed right after an Instagram collect. Polling snapshots stays the primary path; the webhook runs in parallel and is deduped, so both can deliver the same batch safely.
 - **Apify**: Reddit (no Bright Data dataset exists).
 
 ### Platform Datasets (all verified live against the API)
@@ -432,7 +434,7 @@ pnpm codegen                # Generate API types/client
 - `services/brightDataStore.ts` — Postgres or JSON-snapshot persistence
 - `services/brightDataUnified.ts` — on-demand profile fetch (IG/LI/TT)
 - `routes/brightData.ts` — REST + `webhookRouter`
-- `*.test.ts` — 29 tests (`pnpm test`, `node --test src/services/*.test.ts`)
+- `*.test.ts` — 31 tests (`pnpm test`, `node --test src/services/*.test.ts`)
 
 ### Endpoints (prefix matters — everything is mounted under `/api/brightdata`)
 - `POST /api/webhooks/brightdata` — webhook (kept outside the prefix because `BRIGHTDATA_WEBHOOK_URL` hardcodes it)
@@ -466,11 +468,13 @@ pnpm codegen                # Generate API types/client
 - `isNew` is set during merge (only ids the previous fetch had not seen) and now **persists across restarts** — hydration used to clear it, which would have emptied the default view after an app relaunch.
 - Settings' "Auto-fetch frequency" is gone (`FetchFrequency` / `FETCH_FREQUENCY_LABELS` / `AppSettings.fetchFrequency` deleted; hydration drops any stored copy). The backend collects hourly, so the app syncs on a fixed 60-minute timer and Settings shows an explanatory hint instead of a control.
 - A newly subscribed source fires an immediate collect for **every** Bright Data platform (X and Facebook included now that X runs the scraper and FB's dataset accepts `/trigger`).
+- **Refresh cadence**: every fetch schedules the next one 5 minutes later (self-rescheduling timer, so a manual pull-to-refresh just resets it), the first fetch runs once the stored feed has been restored, and returning to the foreground refreshes immediately unless one ran in the last 60 s.
+- **Notifications** (`lib/notifications.ts`, `expo-notifications`): a fetch that discovers unseen post IDs raises one local notification per platform — `Instagram · New post from nasa` — with the post text as the body; permission is requested lazily on the first one, taps open the Feed, and the foreground handler shows banners too. `expo-notifications` is a dependency and an `app.json` plugin; its library manifest supplies `POST_NOTIFICATIONS`, confirmed via `expo prebuild` + `expo-modules-autolinking resolve --platform android`.
 
 ### Config (`.env`, see `.env.example`)
 `BRIGHTDATA_API_TOKEN`, `BRIGHTDATA_WEBHOOK_URL`, `BRIGHTDATA_WEBHOOK_SECRET`, `DATABASE_URL`, `BRIGHTDATA_STATE_FILE`.
 
 ### Status
-- `pnpm run typecheck` ✅ (4 projects) · `pnpm test` ✅ 29/29 with `DATABASE_URL` (28/29 without — the Postgres case skips) · api-server `pnpm build` ✅ · the Expo app bundles on Metro ✅ (1749 modules, no desktop browser attached for a visual pass)
-- Live E2E ✅: subscribe → collect → feed for X + Instagram (32 posts, 2 sources), restart restores the feed from Postgres, SIGTERM flushes and releases the port, public webhook answers 401/200 correctly and received a real Bright Data delivery.
-- The whole Bright Data + feed-UI effort lands as **one squashed commit** on top of `b85b9b1`, so the push starts a single APK build.
+- `pnpm run typecheck` ✅ (4 projects) · `pnpm test` ✅ 31/31 with `DATABASE_URL` · api-server `pnpm build` ✅ · the Expo app bundles on Metro ✅ (iOS 1749 / Android 1884 modules, notifications included; no desktop browser attached for a visual pass)
+- Live E2E ✅: boot catch-up collected 2/2 sources on restart, feed back to 32 posts across X + Instagram, persisted to Postgres, public webhook answers 401/200 correctly.
+- Caveat: the codespace cannot stay running (it sleeps, and port visibility resets), which is why the backend is being moved to a hosted service.
