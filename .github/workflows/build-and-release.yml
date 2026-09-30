@@ -48,6 +48,12 @@ jobs:
 
       - name: Build Release APK with Gradle
         working-directory: ./artifacts/social-scraper/android
+        env:
+          # Backend host for this build, set once as a repository variable
+          # (gh variable set EXPO_PUBLIC_API_URL). Metro inlines it here, where
+          # the JS bundle is produced; empty falls back to the default in
+          # lib/apiConfig.ts.
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
         run: |
           ./gradlew assembleRelease
 
