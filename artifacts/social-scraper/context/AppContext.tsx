@@ -16,15 +16,40 @@ import { refreshRedditMonitor, REDDIT_MONITOR_ID_KEY } from '@/lib/redditMonitor
 import { BRIGHT_DATA_PLATFORMS, fetchBrightDataFeed, syncBrightDataSources } from '@/lib/brightDataApi';
 import { notifyNewPosts, onNotificationOpened } from '@/lib/notifications';
 import { API_BASE_URL } from '@/lib/apiConfig';
+import type { SubscriptionLimits, SubscriptionTier } from '@/types/subscription';
+import { SUBSCRIPTION_TIERS } from '@/types/subscription';
 
-/** The next fetch is scheduled this long after every fetch that finishes. */
-const REFRESH_DELAY_MS = 5 * 60 * 1000;
+/** How often the feed may refresh, per plan — `minScrapeInterval` in types/subscription.ts. */
+const PLAN_REFRESH_MS: Record<SubscriptionLimits['minScrapeInterval'], number> = {
+  daily: 24 * 60 * 60 * 1000,
+  '6h': 6 * 60 * 60 * 1000,
+  '3h': 3 * 60 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+};
+
+/**
+ * TESTING SWITCH: every plan refreshes the feed the moment the app is opened,
+ * so plans can be exercised without waiting out daily/6h/1h. While it is on,
+ * no refresh timer is armed at all — opening the app *is* the refresh — so
+ * nothing can loop. Flip to false to enforce the plan cadences again.
+ */
+const INSTANT_FEED_REFRESH = true;
+
+/** Milliseconds until the next fetch: 0 means "next time the app is used". */
+function feedRefreshDelayMs(tier?: SubscriptionTier): number {
+  if (INSTANT_FEED_REFRESH) return 0;
+  return PLAN_REFRESH_MS[SUBSCRIPTION_TIERS[tier ?? 'free'].minScrapeInterval];
+}
+
 /** Foreground refreshes are throttled so tab switching can't spam the backend. */
 const MIN_REFRESH_GAP_MS = 60 * 1000;
 
 const STORAGE_KEY = '@socialscraper/settings';
 const POSTS_KEY = '@socialscraper/posts';
 const DRAFTS_KEY = '@socialscraper/drafts';
+// When the last refresh happened — persisted so a plan's interval is enforced
+// across app restarts instead of resetting on every launch.
+const LAST_FETCH_KEY = '@socialscraper/lastFetchAt';
 
 const defaultSettings: AppSettings = {
   profile: { name: '', handle: '', bio: '' },
@@ -37,6 +62,7 @@ const defaultSettings: AppSettings = {
     instagram: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
     tiktok: { fetchEnabled: false, postEnabled: false, useApi: true, credentials: {}, followedAccounts: [] },
   },
+  subscriptionTier: 'free',
 };
 
 function generateId(): string {
@@ -639,9 +665,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
 
-  // A fetch schedules its own successor, so the cadence is:
-  // fetch → 5 minutes → fetch → … Manual refreshes and foreground returns
-  // simply reset that same timer instead of stacking a second one.
+  // A fetch schedules its own successor at the pace the plan allows. While
+  // INSTANT_FEED_REFRESH is on the delay is 0, scheduleNextFetch arms nothing,
+  // and the feed simply refreshes when the app is opened (see the effects
+  // below); flipping the switch off brings the plan timers back.
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchInFlightRef = useRef(false);
   const lastFetchAtRef = useRef(0);
@@ -649,10 +676,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const scheduleNextFetch = useCallback((delayMs: number) => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = null;
+    if (delayMs <= 0) return; // instant/testing mode — no timer to arm
     refreshTimerRef.current = setTimeout(() => {
       refreshTimerRef.current = null;
       void fetchPostsRef.current();
     }, delayMs);
+  }, []);
+
+  /**
+   * One rule shared by every refresh trigger (plan timer, cold launch,
+   * foreground return): the plan's interval must have passed since the last
+   * fetch, with MIN_REFRESH_GAP_MS as a floor. While the testing switch is on
+   * the plan asks for 0 ms, so only the 60 s floor applies and every plan
+   * refreshes the moment the app is used.
+   */
+  const refreshAllowed = useCallback(() => {
+    const planDelay = feedRefreshDelayMs(settingsRef.current.subscriptionTier);
+    return Date.now() - lastFetchAtRef.current >= Math.max(planDelay, MIN_REFRESH_GAP_MS);
   }, []);
 
   useEffect(() => {
@@ -699,6 +740,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         const draftsRaw = await AsyncStorage.getItem(DRAFTS_KEY);
         if (draftsRaw) setDrafts(JSON.parse(draftsRaw));
+        // Restored before `hydrated` flips: the very first refresh consults it.
+        const lastFetchRaw = await AsyncStorage.getItem(LAST_FETCH_KEY);
+        if (lastFetchRaw) {
+          const parsedAt = Number(lastFetchRaw);
+          if (Number.isFinite(parsedAt)) lastFetchAtRef.current = parsedAt;
+        }
       } catch { /* ignore hydration errors */ }
       finally { setHydrated(true); }
     })();
@@ -730,6 +777,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (fetchInFlightRef.current) return; // never stack two refreshes
     fetchInFlightRef.current = true;
     lastFetchAtRef.current = Date.now();
+    // Persisted so a plan's interval holds across restarts, not just per session.
+    void AsyncStorage.setItem(LAST_FETCH_KEY, String(lastFetchAtRef.current));
     setIsFetchingPosts(true);
     setLastFetchError(null);
     const s = settingsRef.current;
@@ -847,8 +896,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } finally {
       fetchInFlightRef.current = false;
       setIsFetchingPosts(false);
-      // Chain the next refresh: five minutes from now, success or failure.
-      scheduleNextFetch(REFRESH_DELAY_MS);
+      // Chain the next refresh at the plan's pace (0 while the testing switch
+      // keeps every plan instant, which arms no timer), success or failure.
+      scheduleNextFetch(feedRefreshDelayMs(s.subscriptionTier));
     }
   }, [scheduleNextFetch]);
 
@@ -871,26 +921,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ─── Refresh loop ────────────────────────────────────────────────────────
-  // fetchPosts schedules its own successor (5 minutes later); these effects
-  // only start the chain, restart it after a cold launch, and pick the app up
-  // when it comes back to the foreground.
+  // fetchPosts schedules its own successor at the plan's cadence — nothing
+  // while INSTANT_FEED_REFRESH is on. These effects start the chain, refresh
+  // immediately on a cold launch and when the app returns to the foreground,
+  // and drop any armed timer on unmount. There is no manual refresh: pull to
+  // refresh and the header button are gone, so opening the app is the refresh.
   useEffect(() => {
     fetchPostsRef.current = fetchPosts;
   }, [fetchPosts]);
 
   useEffect(() => {
     if (!hydrated) return; // wait until the stored feed has been restored
-    void fetchPosts();
-  }, [hydrated, fetchPosts]);
+    if (refreshAllowed()) void fetchPosts();
+  }, [hydrated, fetchPosts, refreshAllowed]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
       if (state !== 'active' || fetchInFlightRef.current) return;
-      if (Date.now() - lastFetchAtRef.current < MIN_REFRESH_GAP_MS) return;
+      if (!refreshAllowed()) return;
       void fetchPosts();
     });
     return () => subscription.remove();
-  }, [fetchPosts]);
+  }, [fetchPosts, refreshAllowed]);
 
   // Tapping a "new post" notification opens the Feed.
   useEffect(() => {

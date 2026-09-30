@@ -1,6 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   Platform,
   ScrollView,
@@ -13,7 +12,6 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
@@ -40,7 +38,7 @@ type FeedItem =
 export default function FeedScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { posts, isFetchingPosts, fetchPosts, lastFetchError, startCompose, settings } = useApp();
+  const { posts, isFetchingPosts, lastFetchError, startCompose, settings } = useApp();
   const [activeFilter, setActiveFilter] = useState<FilterId>('new');
   const [errorCopied, setErrorCopied] = useState(false);
   const visibleKeysRef = useRef(new Set<string>());
@@ -98,11 +96,6 @@ export default function FeedScreen() {
     router.push({ pathname: '/edit/[postId]', params: { postId: post.id } });
   }, [startCompose]);
 
-  const handleRefresh = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    fetchPosts();
-  };
-
   const copyError = async () => {
     if (!lastFetchError) return;
     await Clipboard.setStringAsync(lastFetchError);
@@ -140,7 +133,7 @@ export default function FeedScreen() {
         <Text style={[styles.emptySubtitle, { color: colors.mutedForeground }]}>
           {enabledPlatforms.length === 0
             ? 'Enable platforms in Settings to start fetching posts.'
-            : 'Pull down to refresh, or tap the refresh button.'}
+            : 'The feed refreshes on its own when you open the app.'}
         </Text>
         {enabledPlatforms.length === 0 && (
           <TouchableOpacity
@@ -161,12 +154,6 @@ export default function FeedScreen() {
         <HeaderLogo onPress={() => router.push('/')} />
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Feed</Text>
         <View style={styles.headerRight}>
-          <TouchableOpacity onPress={handleRefresh} style={styles.refreshBtn} activeOpacity={0.7}>
-            {isFetchingPosts
-              ? <ActivityIndicator size="small" color={colors.primary} />
-              : <Feather name="refresh-cw" size={20} color={colors.foreground} />
-            }
-          </TouchableOpacity>
           <HeaderAvatar size={34} onPress={() => router.push('/settings')} />
         </View>
       </View>
@@ -282,8 +269,6 @@ export default function FeedScreen() {
           );
         }}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 90 }]}
-        onRefresh={handleRefresh}
-        refreshing={isFetchingPosts}
         ListEmptyComponent={renderEmpty}
         showsVerticalScrollIndicator={false}
       />
@@ -311,12 +296,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  refreshBtn: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   filterBar: { borderBottomWidth: 1, maxHeight: 52 },
   filterBarContent: {

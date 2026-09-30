@@ -1,3 +1,5 @@
+import type { SubscriptionTier } from './subscription';
+
 export type PlatformId = 'x' | 'reddit' | 'linkedin' | 'facebook' | 'instagram' | 'tiktok';
 
 export interface PlatformDef {
@@ -65,6 +67,8 @@ export interface AppSettings {
   profile: Profile;
   ai: AISettings;
   platforms: Record<PlatformId, PlatformSettings>;
+  /** Active plan — it decides how often the feed may refresh. */
+  subscriptionTier: SubscriptionTier;
 }
 
 export interface Post {

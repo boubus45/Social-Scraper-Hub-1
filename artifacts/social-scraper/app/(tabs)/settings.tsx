@@ -391,8 +391,10 @@ export default function SettingsScreen() {
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Feed refresh</Text>
         <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-          Posts are collected by the backend every hour — no interval to configure. Pull the feed
-          down to pick up what has arrived since.
+          The backend collects posts every hour, and your plan sets how often the feed picks them
+          up — Free daily, Pro every 6 hours, Mega Pro every hour. All plans refresh instantly
+          while testing, and the feed updates on its own when you open the app: nothing to pull
+          or tap.
         </Text>
       </View>
     </ScrollView>
