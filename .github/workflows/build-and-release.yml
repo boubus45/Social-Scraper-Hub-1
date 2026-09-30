@@ -49,11 +49,13 @@ jobs:
       - name: Build Release APK with Gradle
         working-directory: ./artifacts/social-scraper/android
         env:
-          # Backend host for this build, set once as a repository variable
-          # (gh variable set EXPO_PUBLIC_API_URL). Metro inlines it here, where
-          # the JS bundle is produced; empty falls back to the default in
-          # lib/apiConfig.ts.
-          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
+          # Backend host, inlined by Metro right here where the JS bundle is
+          # made. The repository variable wins when it is set (`gh variable set
+          # EXPO_PUBLIC_API_URL`, or Settings → Secrets and variables → Actions
+          # → Variables); until then the Render deployment is used, so no build
+          # is ever left pointing at a stopped codespace. Both an empty and a
+          # missing value fall back once more in lib/apiConfig.ts.
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || 'https://social-scraper-hub.onrender.com' }}
         run: |
           ./gradlew assembleRelease
 
