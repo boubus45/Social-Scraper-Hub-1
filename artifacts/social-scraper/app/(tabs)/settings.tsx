@@ -23,6 +23,8 @@ import PlatformBadge from '@/components/PlatformBadge';
 import { PLATFORM_LIST } from '@/constants/platforms';
 import { PlatformCredentials, PlatformId } from '@/types';
 import { API_BASE_URL } from '@/lib/apiConfig';
+import { authHeaders, currentUserId } from '@/lib/authSession';
+import { SUBSCRIPTION_TIERS, type SubscriptionTier } from '@/types/subscription';
 
 // OAuth configuration for each platform
 const OAUTH_CONFIG: Record<PlatformId, {
@@ -76,14 +78,22 @@ const OAUTH_CONFIG: Record<PlatformId, {
   tiktok: null,
 };
 
+/** Plan names as the account sees them, under their email. */
+const PLAN_LABELS: Record<SubscriptionTier, string> = {
+  free: 'Free',
+  pro: 'Pro',
+  'mega-pro': 'Mega Pro',
+  admin: 'Admin',
+};
+
 // Generate PKCE code verifier and challenge
 async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
-  const verifier = Array.from({ length: 64 }, () => 
+  const verifier = Array.from({ length: 64 }, () =>
     'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~'[
       Math.floor(Math.random() * 66)
     ]
   ).join('');
-  
+
   const encoder = new TextEncoder();
   const data = encoder.encode(verifier);
   const digest = await crypto.subtle.digest('SHA-256', data);
@@ -91,7 +101,7 @@ async function generatePkce(): Promise<{ verifier: string; challenge: string }> 
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
-  
+
   return { verifier, challenge };
 }
 
@@ -100,10 +110,12 @@ async function handleOAuthLogin(platform: PlatformId): Promise<void> {
   if (!config) return;
 
   const baseUrl = API_BASE_URL.replace(/\/api$/, "");
-  
+
   try {
     // Fetch the auth URL from backend (which knows the client ID)
-    const authUrlRes = await fetch(`${baseUrl}/api/oauth/${platform}/auth-url`);
+    const authUrlRes = await fetch(`${baseUrl}/api/oauth/${platform}/auth-url`, {
+      headers: await authHeaders(),
+    });
     if (!authUrlRes.ok) {
       const err = await authUrlRes.text();
       Alert.alert('Error', err || `OAuth not configured for ${config.label}`);
@@ -112,7 +124,7 @@ async function handleOAuthLogin(platform: PlatformId): Promise<void> {
     const { url, redirectUri } = await authUrlRes.json() as { url: string; redirectUri: string };
 
     let codeVerifier: string | undefined;
-    
+
     let authUrl = new URL(url);
     if (config.usePkce) {
       const pkce = await generatePkce();
@@ -124,7 +136,7 @@ async function handleOAuthLogin(platform: PlatformId): Promise<void> {
 
     // Open the auth session
     const result = await WebBrowser.openAuthSessionAsync(authUrl.toString(), redirectUri);
-    
+
     if (result.type === 'success' && result.url) {
       // Extract code from redirect URL
       const redirectUrl = new URL(result.url);
@@ -133,14 +145,14 @@ async function handleOAuthLogin(platform: PlatformId): Promise<void> {
         // Send code to backend for token exchange
         const callbackRes = await fetch(`${baseUrl}/api/oauth/${platform}/callback`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
           body: JSON.stringify({
             code,
-            userId: 'local-user',
+            userId: currentUserId() ?? 'local-user',
             codeVerifier,
           }),
         });
-        
+
         if (callbackRes.ok) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           Alert.alert('Success', `Connected to ${config.label}!`);
@@ -164,7 +176,7 @@ function hasOAuthCredentials(platform: PlatformId, credentials: PlatformCredenti
     case 'reddit':
       return !!(credentials.clientId && credentials.clientSecret);
     case 'linkedin':
-      return !!(credentials.accessToken);
+      return !!credentials.accessToken;
     case 'facebook':
       return !!(credentials.accessToken || credentials.cookies);
     case 'instagram':
@@ -187,10 +199,24 @@ function SectionHeader({ title, icon }: { title: string; icon: string }) {
 export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { settings, updateSettings, updatePlatformSettings } = useApp();
+  const { settings, updateSettings, updatePlatformSettings, session, updateAccountName, signOut } = useApp();
   const [expandedPlatform, setExpandedPlatform] = useState<PlatformId | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
   const topPad = Platform.OS === 'web' ? Math.max(insets.top, 67) : insets.top;
+
+  // ─── Identity (read-only account card) ───────────────────────────────────
+  // Photo: account avatar (Google) or a locally picked one, either wins.
+  const avatarUri = session?.avatarUrl || settings.profile.avatarUri || null;
+  const email = session?.email ?? '';
+  const tier = (session?.tier ?? settings.subscriptionTier) as SubscriptionTier;
+  const planLabel = PLAN_LABELS[tier] ?? 'Free';
+  // Name from the social account that created the profile; email-only accounts
+  // have none, so only the email is shown until they add one.
+  const accountName = session?.name?.trim() || '';
+  const displayName = accountName || email.split('@')[0] || 'Your account';
 
   const handlePickAvatar = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -210,17 +236,55 @@ export default function SettingsScreen() {
     }
   };
 
+  const startEditName = () => {
+    setNameDraft(accountName);
+    setEditingName(true);
+  };
+
+  const cancelEditName = () => {
+    setEditingName(false);
+    setNameDraft('');
+  };
+
+  const saveName = async () => {
+    const trimmed = nameDraft.trim();
+    setSavingName(true);
+    try {
+      await updateAccountName(trimmed);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setEditingName(false);
+    } catch (error) {
+      Alert.alert('Could not save', error instanceof Error ? error.message : 'Try again.');
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const handleSignOut = () => {
+    Alert.alert('Sign out?', 'You will need a new email code to get back in.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: () => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          void signOut();
+        },
+      },
+    ]);
+  };
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 90 }]}
     >
-      {/* ── Profile Hero (no top-left icon, big centered avatar) ── */}
+      {/* ── Identity: photo, name, email, plan ── */}
       <View style={[styles.profileHero, { paddingTop: topPad + 20 }]}>
         <TouchableOpacity onPress={handlePickAvatar} activeOpacity={0.8} style={styles.avatarWrap}>
           <View style={[styles.avatarOuter, { borderColor: colors.primary + '60' }]}>
-            {settings.profile.avatarUri ? (
-              <Image source={{ uri: settings.profile.avatarUri }} style={styles.avatarImg} />
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
             ) : (
               <View style={[styles.avatarPlaceholder, { backgroundColor: colors.secondary }]}>
                 <Feather name="user" size={36} color={colors.mutedForeground} />
@@ -232,45 +296,46 @@ export default function SettingsScreen() {
           </View>
         </TouchableOpacity>
 
-        <Text style={[styles.heroName, { color: colors.foreground }]}>
-          {settings.profile.name || 'Your Name'}
-        </Text>
-        <Text style={[styles.heroHandle, { color: colors.mutedForeground }]}>
-          {settings.profile.handle || '@yourhandle'}
-        </Text>
-        {settings.profile.bio ? (
-          <Text style={[styles.heroBio, { color: colors.mutedForeground }]} numberOfLines={2}>
-            {settings.profile.bio}
+        {/* Editable name */}
+        {editingName ? (
+          <View style={styles.nameEditRow}>
+            <TextInput
+              style={[styles.nameInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+              value={nameDraft}
+              onChangeText={setNameDraft}
+              placeholder="Your name"
+              placeholderTextColor={colors.mutedForeground}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={saveName}
+              editable={!savingName}
+            />
+            <TouchableOpacity onPress={saveName} disabled={savingName} style={styles.nameEditBtn} hitSlop={8}>
+              <Feather name="check" size={16} color={colors.success} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={cancelEditName} disabled={savingName} style={styles.nameEditBtn} hitSlop={8}>
+              <Feather name="x" size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity onPress={startEditName} activeOpacity={0.7} style={styles.nameTapTarget}>
+            <Text style={[styles.heroName, { color: colors.foreground }]} numberOfLines={1}>
+              {displayName}
+            </Text>
+            <Feather name="edit-2" size={13} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        )}
+
+        {accountName && email ? (
+          <Text style={[styles.heroHandle, { color: colors.mutedForeground }]} numberOfLines={1}>
+            {email}
           </Text>
         ) : null}
-      </View>
 
-      {/* Profile fields */}
-      <SectionHeader title="Profile" icon="user" />
-      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <InputRow
-          label="Name"
-          value={settings.profile.name}
-          onChange={v => updateSettings({ profile: { ...settings.profile, name: v } })}
-          placeholder="Your full name"
-          colors={colors}
-        />
-        <InputRow
-          label="Handle"
-          value={settings.profile.handle}
-          onChange={v => updateSettings({ profile: { ...settings.profile, handle: v } })}
-          placeholder="@yourhandle"
-          colors={colors}
-        />
-        <InputRow
-          label="Bio"
-          value={settings.profile.bio}
-          onChange={v => updateSettings({ profile: { ...settings.profile, bio: v } })}
-          placeholder="Short bio..."
-          colors={colors}
-          multiline
-          last
-        />
+        {/* Plan under email */}
+        <Text style={[styles.planLabel, { color: colors.primary }]}>
+          {planLabel}
+        </Text>
       </View>
 
       {/* ── AI features ── */}
@@ -386,17 +451,20 @@ export default function SettingsScreen() {
         })}
       </View>
 
-      {/* ── Preferences ── */}
-      <SectionHeader title="Preferences" icon="sliders" />
-      <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Feed refresh</Text>
-        <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-          The backend collects posts every hour, and your plan sets how often the feed picks them
-          up — Free daily, Pro every 6 hours, Mega Pro every hour. All plans refresh instantly
-          while testing, and the feed updates on its own when you open the app: nothing to pull
-          or tap.
-        </Text>
-      </View>
+      {/* ── Sign out ── */}
+      <TouchableOpacity
+        onPress={handleSignOut}
+        activeOpacity={0.85}
+        style={[styles.signOutBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+      >
+        <Feather name="log-out" size={16} color={colors.destructive} />
+        <Text style={[styles.signOutText, { color: colors.destructive }]}>Sign out</Text>
+      </TouchableOpacity>
+
+      {/* User ID */}
+      <Text style={[styles.userId, { color: colors.mutedForeground }]}>
+        User ID: {session?.id ?? '—'}
+      </Text>
     </ScrollView>
   );
 }
@@ -479,28 +547,6 @@ function TagInput({
         returnKeyType="done"
       />
     </TouchableOpacity>
-  );
-}
-
-function InputRow({
-  label, value, onChange, placeholder, multiline, last, colors,
-}: {
-  label: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; multiline?: boolean; last?: boolean; colors: ReturnType<typeof useColors>;
-}) {
-  return (
-    <View style={[styles.inputRow, last ? {} : { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
-      <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>{label}</Text>
-      <TextInput
-        style={[styles.inlineInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={colors.mutedForeground}
-        multiline={multiline}
-        autoCapitalize="none"
-      />
-    </View>
   );
 }
 
@@ -612,22 +658,64 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#0D0D14',
   },
+  nameTapTarget: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
   heroName: {
     fontSize: 20,
     fontFamily: 'Inter_700Bold',
     letterSpacing: -0.3,
   },
+  nameEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+  },
+  nameInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
+    fontFamily: 'Inter_400Regular',
+    minWidth: 180,
+  },
+  nameEditBtn: {
+    padding: 4,
+  },
   heroHandle: {
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
   },
-  heroBio: {
+  planLabel: {
     fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    marginTop: 2,
+  },
+  signOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 24,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 13,
+  },
+  signOutText: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  userId: {
+    fontSize: 11,
     fontFamily: 'Inter_400Regular',
     textAlign: 'center',
-    lineHeight: 19,
-    marginTop: 2,
-    paddingHorizontal: 32,
+    marginTop: 12,
   },
 
   sectionHeader: {

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Platform,
@@ -16,80 +16,76 @@ import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useApp } from '@/context/AppContext';
 import PostCard from '@/components/PostCard';
-import PlatformBadge from '@/components/PlatformBadge';
 import { HeaderLogo } from '@/components/HeaderLogo';
 import { HeaderAvatar } from '@/components/HeaderAvatar';
 import { PlatformId, Post } from '@/types';
 import { PLATFORM_LIST } from '@/constants/platforms';
 
 /**
- * `new` (the default) shows only what the last fetch brought in, grouped by
- * platform — so you never scroll through one platform's archive to reach the
- * other platforms' fresh posts. Platforms with nothing new are left out.
- * `all` keeps the original "everything, separated by platform" view.
+ * `newest` (the default) is every platform's posts in one flat, strictly
+ * chronological list: the newest post first, the oldest last. Grouping by
+ * platform or source is deliberately gone — it forced you to scroll past one
+ * account's whole archive before reaching anyone else's new posts.
+ * A platform chip narrows the same flat list to that platform.
  */
-type FilterId = 'new' | 'all' | PlatformId;
-type FeedItem =
-  | { kind: 'platform'; key: string; label: string; platform: PlatformId }
-  | { kind: 'source'; key: string; label: string; platform: PlatformId }
-  | { kind: 'category'; key: string; label: string; official: boolean }
-  | { kind: 'post'; key: string; post: Post };
+type FilterId = 'newest' | PlatformId;
+
+function newestFirst(posts: Post[]): Post[] {
+  return [...posts].sort((a, b) => {
+    const aTime = new Date(a.timestamp).getTime();
+    const bTime = new Date(b.timestamp).getTime();
+    // Undated posts sort to the bottom rather than breaking the ordering.
+    if (Number.isNaN(aTime)) return Number.isNaN(bTime) ? 0 : 1;
+    if (Number.isNaN(bTime)) return -1;
+    return bTime - aTime;
+  });
+}
 
 export default function FeedScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { posts, isFetchingPosts, lastFetchError, startCompose, settings } = useApp();
-  const [activeFilter, setActiveFilter] = useState<FilterId>('new');
+  const [activeFilter, setActiveFilter] = useState<FilterId>('newest');
   const [errorCopied, setErrorCopied] = useState(false);
-  const visibleKeysRef = useRef(new Set<string>());
+  // Viewability drives video autoplay, so it has to be state: a ref would
+  // update silently and leave every card playing on its last-known value.
+  const [activePostKey, setActivePostKey] = useState<string | null>(null);
+  const lastActiveRef = useRef<string | null>(null);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const next = new Set(viewableItems.map(v => v.key as string));
-    visibleKeysRef.current = next;
+    // One video plays at a time: the on-screen item closest to the middle of
+    // the list, which for these media cards is the one filling the viewport.
+    let best: ViewToken | null = null;
+    for (const candidate of viewableItems) {
+      if (!candidate.isViewable || !candidate.item) continue;
+      if (!best || (candidate.item.index ?? 0) > (best.item.index ?? 0)) best = candidate;
+    }
+    const next = best ? String((best.item as { id?: string }).id) : null;
+    if (next === lastActiveRef.current) return;
+    lastActiveRef.current = next;
+    setActivePostKey(next);
   }).current;
 
-  const enabledPlatforms = PLATFORM_LIST.filter(p => settings.platforms[p.id].fetchEnabled);
-  const newCount = posts.filter(post => post.isNew).length;
-  const filtered =
-    activeFilter === 'new'
-      ? posts.filter(post => post.isNew)
-      : activeFilter === 'all'
-        ? posts
-        : posts.filter(post => post.platform === activeFilter);
+  const enabledPlatforms = useMemo(
+    () => PLATFORM_LIST.filter(p => settings.platforms[p.id].fetchEnabled),
+    [settings.platforms],
+  );
 
-  // Newest post of a platform inside the current view; used to order the
-  // sections so the freshest platform is never below someone's scroll.
-  const newestIn = (platform: PlatformId): number =>
-    filtered.reduce<number>((latest, post) => {
-      if (post.platform !== platform) return latest;
-      const time = new Date(post.timestamp).getTime();
-      return Number.isNaN(time) ? latest : Math.max(latest, time);
-    }, 0);
+  const filtered = useMemo(() => {
+    const scoped =
+      activeFilter === 'newest' ? posts : posts.filter(post => post.platform === activeFilter);
+    return newestFirst(scoped);
+  }, [posts, activeFilter]);
 
-  const feedItems: FeedItem[] = [];
-  const visiblePlatforms = PLATFORM_LIST.filter(platform =>
-    filtered.some(post => post.platform === platform.id),
-  ).sort((a, b) => newestIn(b.id) - newestIn(a.id));
-  for (const platform of visiblePlatforms) {
-    const platformPosts = filtered.filter(post => post.platform === platform.id);
-    feedItems.push({ kind: 'platform', key: `platform:${platform.id}`, label: platform.name, platform: platform.id });
-    const sourceKeys = Array.from(new Set(platformPosts.map(post => post.sourceKey ?? `${post.platform}:general`)));
-    for (const sourceKey of sourceKeys) {
-      const sourcePosts = platformPosts.filter(post => (post.sourceKey ?? `${post.platform}:general`) === sourceKey);
-      const sourceLabel = sourcePosts[0]?.sourceLabel ?? 'General feed';
-      feedItems.push({ kind: 'source', key: `source:${sourceKey}`, label: sourceLabel, platform: platform.id });
-      const official = sourcePosts.filter(post => post.isOfficial);
-      const community = sourcePosts.filter(post => !post.isOfficial);
-      if (official.length > 0) {
-        feedItems.push({ kind: 'category', key: `${sourceKey}:official`, label: 'Official / source posts', official: true });
-        official.forEach(post => feedItems.push({ kind: 'post', key: post.id, post }));
-      }
-      if (community.length > 0) {
-        feedItems.push({ kind: 'category', key: `${sourceKey}:community`, label: 'Community posts', official: false });
-        community.forEach(post => feedItems.push({ kind: 'post', key: post.id, post }));
-      }
-    }
-  }
+  const countFor = useCallback(
+    (filter: FilterId) =>
+      filter === 'newest' ? posts.length : posts.filter(post => post.platform === filter).length,
+    [posts],
+  );
+  const newCountFor = useCallback(
+    (platform: PlatformId) => posts.filter(post => post.platform === platform && post.isNew).length,
+    [posts],
+  );
 
   const handleCompose = useCallback((post: Post) => {
     startCompose(post);
@@ -107,42 +103,40 @@ export default function FeedScreen() {
 
   const renderEmpty = () => {
     if (isFetchingPosts) return null;
-    // Something is stored but nothing arrived in the last fetch: say so instead
-    // of looking like the feed is broken, and offer the archive.
-    if (activeFilter === 'new' && posts.length > 0) {
+    if (posts.length === 0) {
       return (
         <View style={styles.emptyContainer}>
-          <Feather name="check-circle" size={48} color={colors.mutedForeground} />
-          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No new posts</Text>
+          <Feather name="inbox" size={48} color={colors.mutedForeground} />
+          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No posts yet</Text>
           <Text style={[styles.emptySubtitle, { color: colors.mutedForeground }]}>
-            Nothing new since the last fetch. Switch to All to browse earlier posts.
+            {enabledPlatforms.length === 0
+              ? 'Enable platforms in Settings to start fetching posts.'
+              : 'The feed refreshes on its own when you open the app.'}
           </Text>
-          <TouchableOpacity
-            onPress={() => setActiveFilter('all')}
-            style={[styles.settingsBtn, { backgroundColor: colors.primary }]}
-          >
-            <Text style={styles.settingsBtnText}>Show all posts</Text>
-          </TouchableOpacity>
+          {enabledPlatforms.length === 0 && (
+            <TouchableOpacity
+              onPress={() => router.push('/settings')}
+              style={[styles.settingsBtn, { backgroundColor: colors.primary }]}
+            >
+              <Text style={styles.settingsBtnText}>Open Settings</Text>
+            </TouchableOpacity>
+          )}
         </View>
       );
     }
     return (
       <View style={styles.emptyContainer}>
-        <Feather name="inbox" size={48} color={colors.mutedForeground} />
-        <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No posts yet</Text>
+        <Feather name="check-circle" size={48} color={colors.mutedForeground} />
+        <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No posts on this platform</Text>
         <Text style={[styles.emptySubtitle, { color: colors.mutedForeground }]}>
-          {enabledPlatforms.length === 0
-            ? 'Enable platforms in Settings to start fetching posts.'
-            : 'The feed refreshes on its own when you open the app.'}
+          Switch back to Newest to see everything, or add an account in Settings.
         </Text>
-        {enabledPlatforms.length === 0 && (
-          <TouchableOpacity
-            onPress={() => router.push('/settings')}
-            style={[styles.settingsBtn, { backgroundColor: colors.primary }]}
-          >
-            <Text style={styles.settingsBtnText}>Open Settings</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          onPress={() => setActiveFilter('newest')}
+          style={[styles.settingsBtn, { backgroundColor: colors.primary }]}
+        >
+          <Text style={styles.settingsBtnText}>Show all posts</Text>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -166,37 +160,22 @@ export default function FeedScreen() {
         contentContainerStyle={styles.filterBarContent}
       >
         <TouchableOpacity
-          onPress={() => setActiveFilter('new')}
+          onPress={() => setActiveFilter('newest')}
           style={[
             styles.filterChip,
             {
-              backgroundColor: activeFilter === 'new' ? colors.primary : colors.card,
-              borderColor: activeFilter === 'new' ? colors.primary : colors.border,
+              backgroundColor: activeFilter === 'newest' ? colors.primary : colors.card,
+              borderColor: activeFilter === 'newest' ? colors.primary : colors.border,
             },
           ]}
         >
-          <Text style={[styles.filterText, { color: activeFilter === 'new' ? '#FFF' : colors.mutedForeground }]}>
-            New ({newCount})
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => setActiveFilter('all')}
-          style={[
-            styles.filterChip,
-            {
-              backgroundColor: activeFilter === 'all' ? colors.primary : colors.card,
-              borderColor: activeFilter === 'all' ? colors.primary : colors.border,
-            },
-          ]}
-        >
-          <Text style={[styles.filterText, { color: activeFilter === 'all' ? '#FFF' : colors.mutedForeground }]}>
-            All ({posts.length})
+          <Text style={[styles.filterText, { color: activeFilter === 'newest' ? '#FFF' : colors.mutedForeground }]}>
+            Newest ({countFor('newest')})
           </Text>
         </TouchableOpacity>
         {enabledPlatforms.map(p => {
-          const platformPosts = posts.filter(post => post.platform === p.id);
-          const count = platformPosts.length;
-          const platformNew = platformPosts.filter(post => post.isNew).length;
+          const count = countFor(p.id);
+          const platformNew = newCountFor(p.id);
           const isActive = activeFilter === p.id;
           return (
             <TouchableOpacity
@@ -230,47 +209,23 @@ export default function FeedScreen() {
         </View>
       )}
 
-      {/* Posts */}
+      {/* Posts: one flat, newest-first list */}
       <FlatList
-        data={feedItems}
-        keyExtractor={item => item.key}
+        data={filtered}
+        keyExtractor={post => post.id}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
-        renderItem={({ item }) => {
-          if (item.kind === 'post') {
-            return <PostCard post={item.post} onCompose={() => handleCompose(item.post)} visible={visibleKeysRef.current.has(item.key)} />;
-          }
-          if (item.kind === 'platform') {
-            const def = PLATFORM_LIST.find(platform => platform.id === item.platform);
-            return (
-              <View style={styles.platformSectionHeader}>
-                <PlatformBadge platform={item.platform} size="sm" />
-                <Text style={[styles.platformSectionTitle, { color: def?.color ?? colors.foreground }]}>
-                  {item.label}
-                </Text>
-              </View>
-            );
-          }
-          if (item.kind === 'source') {
-            return (
-              <View style={[styles.sourceHeader, { borderColor: colors.border }]}>
-                <Feather name="hash" size={13} color={colors.mutedForeground} />
-                <Text style={[styles.sourceTitle, { color: colors.foreground }]}>{item.label}</Text>
-              </View>
-            );
-          }
-          return (
-            <View style={styles.categoryHeader}>
-              <View style={[styles.categoryDot, { backgroundColor: item.official ? colors.warning : colors.mutedForeground }]} />
-              <Text style={[styles.categoryTitle, { color: item.official ? colors.warning : colors.mutedForeground }]}>
-                {item.label}
-              </Text>
-            </View>
-          );
-        }}
+        renderItem={({ item }) => (
+          <PostCard
+            post={item}
+            onCompose={() => handleCompose(item)}
+            visible={activePostKey === item.id}
+          />
+        )}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 90 }]}
         ListEmptyComponent={renderEmpty}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={false}
       />
     </View>
   );
@@ -327,31 +282,6 @@ const styles = StyleSheet.create({
   },
   errorText: { flex: 1, fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
   listContent: { padding: 16 },
-  platformSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-    marginBottom: 8,
-  },
-  platformSectionTitle: { fontSize: 17, fontFamily: 'Inter_700Bold' },
-  sourceHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingBottom: 7,
-    borderBottomWidth: 1,
-    marginBottom: 8,
-  },
-  sourceTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  categoryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
-  },
-  categoryDot: { width: 6, height: 6, borderRadius: 3 },
-  categoryTitle: { fontSize: 11, fontFamily: 'Inter_600SemiBold', textTransform: 'uppercase', letterSpacing: 0.5 },
   emptyContainer: {
     alignItems: 'center',
     paddingTop: 60,

@@ -15,6 +15,8 @@ export interface AuthUser {
   email: string;
   name: string | null;
   avatarUrl: string | null;
+  /** 'google' when the account was opened through Google, 'email' otherwise. */
+  provider?: 'google' | 'email';
   tier: SubscriptionTier;
 }
 
@@ -130,6 +132,30 @@ export async function fetchCurrentUser(token: string): Promise<AuthUser> {
     throw new Error('That sign-in could not be verified. Try again.');
   }
   return data.user;
+}
+
+/**
+ * Rename the account. The name lives in the JWT claims, so the backend answers
+ * with a refreshed token and this stores both.
+ */
+export async function updateAccountName(name: string): Promise<Session> {
+  const headers = await authHeaders();
+  const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify({ name }),
+  });
+  const data = (await response.json().catch(() => ({}))) as {
+    user?: AuthUser;
+    token?: string;
+    error?: string;
+  };
+  if (!response.ok || !data.user || !data.token) {
+    throw new Error(data.error || 'Could not save that name.');
+  }
+  const next: Session = { ...data.user, token: data.token };
+  await saveSession(next);
+  return next;
 }
 
 /** Which social sign-in buttons the backend can actually complete. */

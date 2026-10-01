@@ -246,6 +246,84 @@ test("profile records with no posts are not read as posts themselves", () => {
   assert.equal(posts.length, 0);
 });
 
+test("Instagram reels use the video file, not the cover image", () => {
+  const records = [
+    {
+      account: "nasa",
+      posts: [
+        {
+          id: "3601111111111111111",
+          url: "https://www.instagram.com/reel/ABC/",
+          caption: "Launch day",
+          image_url: "https://cdninstagram.com/p/ABC/cover.jpg",
+          video_url: "https://cdninstagram.com/p/ABC/video.mp4",
+        },
+      ],
+    },
+  ];
+  const posts = normalizeFeedRecords("instagram", records, "nasa");
+  assert.deepEqual(posts[0].media, [
+    { type: "video", url: "https://cdninstagram.com/p/ABC/video.mp4" },
+    { type: "image", url: "https://cdninstagram.com/p/ABC/cover.jpg" },
+  ]);
+});
+
+test("Instagram photo posts still show their image", () => {
+  const posts = normalizeFeedRecords(
+    "instagram",
+    [
+      {
+        account: "nasa",
+        posts: [
+          {
+            id: "3602222222222222222",
+            url: "https://www.instagram.com/p/DEF/",
+            image_url: "https://cdninstagram.com/p/DEF/media.jpg",
+            content_type: "GraphImage",
+          },
+        ],
+      },
+    ],
+    "nasa",
+  );
+  assert.deepEqual(posts[0].media, [
+    { type: "image", url: "https://cdninstagram.com/p/DEF/media.jpg" },
+  ]);
+});
+
+test("X video posts keep the playable file and drop the page link", () => {
+  const posts = normalizeFeedRecords(
+    "x",
+    [
+      {
+        posts: [
+          {
+            post_url: "https://x.com/NASA/status/2103583087540003274/video/1",
+            post_text: "Artemis III rolls out",
+            author_handle: "@NASA",
+            media_image_url: "https://pbs.twimg.com/media/cover.jpg",
+            // A page link must not be fed to the player as a video file.
+            videos: ["https://x.com/NASA/status/2103583087540003274/video/1"],
+          },
+          {
+            post_url: "https://x.com/NASA/status/2103583087540003275/video/1",
+            post_text: "Second video",
+            author_handle: "@NASA",
+            videos: [{ url: "https://video.twimg.com/ext_tw/1234/pu/pl/abc.mp4" }],
+          },
+        ],
+      },
+    ],
+    "nasa",
+  );
+  assert.deepEqual(posts[0].media, [
+    { type: "image", url: "https://pbs.twimg.com/media/cover.jpg" },
+  ]);
+  assert.deepEqual(posts[1].media, [
+    { type: "video", url: "https://video.twimg.com/ext_tw/1234/pu/pl/abc.mp4" },
+  ]);
+});
+
 test("records without an id are skipped instead of colliding", () => {
   const posts = normalizeFeedRecords("facebook", [{ content: "no id here" }, null, "junk"], "nasa");
   assert.equal(posts.length, 0);

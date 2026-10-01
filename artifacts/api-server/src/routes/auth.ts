@@ -4,6 +4,7 @@ import {
   isValidEmail,
   normalizeEmail,
   requestLoginCode,
+  updateProfile,
   upsertExternalUser,
   verifyLoginCode,
 } from "../services/authService";
@@ -64,6 +65,20 @@ router.get("/auth/me", requireAuth, (req, res) => {
   const user = authUser(req);
   if (!user) return res.status(401).json({ error: "Sign in required." });
   return res.json({ user });
+});
+
+/** Rename the account. Returns a token whose claims carry the new name. */
+router.patch("/auth/me", requireAuth, async (req, res) => {
+  const user = authUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in required." });
+  try {
+    const result = await updateProfile(user.id, { name: req.body?.name });
+    return res.json(result);
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : "Could not save that name.",
+    });
+  }
 });
 
 /** Lets the app grey out sign-in options the backend cannot complete yet. */

@@ -22,6 +22,8 @@ export const users = pgTable(
     email: text("email").notNull(),
     name: text("name"),
     avatarUrl: text("avatar_url"),
+    /** How the account is signing in: 'email' (one-time code) or 'google'. */
+    provider: text("provider").notNull().default("email"),
     tier: text("tier").notNull().default("free"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

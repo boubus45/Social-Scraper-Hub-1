@@ -122,20 +122,15 @@ function MediaItem({
   visible: boolean;
   onFullscreenChange: (active: boolean) => void;
 }) {
-  const [playing, setPlaying] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [muted, setMuted] = useState(true);
+  // `userPaused` only matters while the card is on screen: scrolling away
+  // always stops playback, and coming back resumes unless they opted out.
+  const [userPaused, setUserPaused] = useState(false);
   const videoRef = useRef<Video>(null);
+  const shouldPlay = visible && !userPaused;
 
-  const togglePlayback = async () => {
-    if (!videoRef.current) return;
-    if (playing) {
-      await videoRef.current.pauseAsync();
-      setPlaying(false);
-    } else {
-      await videoRef.current.playAsync();
-      setPlaying(true);
-    }
-  };
+  const togglePlayback = () => setUserPaused(paused => !paused);
 
   const openFullscreen = () => {
     setFullscreen(true);
@@ -146,7 +141,6 @@ function MediaItem({
     setFullscreen(false);
     onFullscreenChange(false);
     await ScreenOrientation.unlockAsync();
-    setPlaying(false);
   };
 
   if (item.type === 'video') {
@@ -158,27 +152,37 @@ function MediaItem({
           source={{ uri: item.url }}
           style={styles.media}
           resizeMode={ResizeMode.CONTAIN}
-          shouldPlay={visible && playing}
+          shouldPlay={shouldPlay}
+          isMuted={muted}
           isLooping
-          onPlaybackStatusUpdate={(s) => {
-            if (s.isLoaded && !s.isPlaying && playing) {
-              setPlaying(false);
-            }
-          }}
+          // Both platforms require a muted start for autoplay; the speaker
+          // button below is the only way to turn sound on.
+          useNativeControls={false}
         />
         <TouchableOpacity
           style={styles.videoOverlay}
           onPress={togglePlayback}
           activeOpacity={0.9}
-          accessibilityLabel={playing ? "Pause video" : "Play video"}
+          accessibilityLabel={shouldPlay ? "Pause video" : "Play video"}
         >
-          {!playing && (
+          {!shouldPlay && (
             <View style={styles.playButton}>
               <Feather name="play" size={24} color="#FFF" />
             </View>
           )}
         </TouchableOpacity>
-        <TouchableOpacity style={styles.fullscreenButton} onPress={openFullscreen} accessibilityLabel="Open video fullscreen">
+        <TouchableOpacity
+          style={styles.fullscreenButton}
+          onPress={() => setMuted(m => !m)}
+          accessibilityLabel={muted ? "Unmute video" : "Mute video"}
+        >
+          <Feather name={muted ? 'volume-x' : 'volume-2'} size={18} color="#FFF" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.fullscreenButton, styles.fullscreenRight]}
+          onPress={openFullscreen}
+          accessibilityLabel="Open video fullscreen"
+        >
           <Feather name="maximize-2" size={18} color="#FFF" />
         </TouchableOpacity>
       </View>
@@ -190,6 +194,7 @@ function MediaItem({
             resizeMode={ResizeMode.CONTAIN}
             useNativeControls
             shouldPlay
+            isMuted={muted}
             isLooping
           />
           <TouchableOpacity style={styles.closeVideoButton} onPress={closeFullscreen} accessibilityLabel="Close fullscreen video">
@@ -226,15 +231,20 @@ export default function PostCard({ post, onCompose, visible }: Props) {
     return items;
   })();
 
+  // X posts run long by nature; 180 characters cut most of them mid-sentence and
+// read as broken text. Only genuinely long posts collapse now.
+const COLLAPSE_AFTER = 480;
+
   const openOriginal = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     await Linking.openURL(post.url);
   };
 
-  const isLongPost = post.content.length > 180;
+  const isLongPost = post.content.length > COLLAPSE_AFTER;
   const renderPostContent = (full: boolean) => {
     const expanded = full || textExpanded;
-    const content = expanded || !isLongPost ? post.content : `${post.content.slice(0, 180).trimEnd()}…`;
+    const content =
+      expanded || !isLongPost ? post.content : `${post.content.slice(0, COLLAPSE_AFTER).trimEnd()}…`;
     return (
       <View>
         {content ? (
@@ -246,9 +256,11 @@ export default function PostCard({ post, onCompose, visible }: Props) {
           />
         ) : null}
         {!full && isLongPost && (
-          <Text style={[styles.expandHint, { color: colors.primary }]}>
-            {expanded ? '- Collapse' : '+ Expand'}
-          </Text>
+          <TouchableOpacity onPress={() => setTextExpanded(value => !value)} hitSlop={8}>
+            <Text style={[styles.expandHint, { color: colors.primary }]}>
+              {expanded ? 'Show less' : 'Show more'}
+            </Text>
+          </TouchableOpacity>
         )}
       </View>
     );
@@ -366,6 +378,7 @@ const styles = StyleSheet.create({
   videoOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   playButton: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center', paddingLeft: 4 },
   fullscreenButton: { position: 'absolute', right: 10, bottom: 10, width: 38, height: 38, borderRadius: 19, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center' },
+  fullscreenRight: { right: 56 },
   videoFullscreen: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   fullscreenVideo: { width: '100%', height: '100%' },
   closeVideoButton: { position: 'absolute', top: 28, right: 18, width: 42, height: 42, borderRadius: 21, backgroundColor: '#000A', alignItems: 'center', justifyContent: 'center' },

@@ -19,6 +19,8 @@ export interface AuthUser {
   email: string;
   name: string | null;
   avatarUrl: string | null;
+  /** 'email' (one-time code) or 'google' — the method of the latest sign-in. */
+  provider: string;
   tier: string;
 }
 
@@ -78,6 +80,7 @@ export function signToken(user: AuthUser): string {
       email: user.email,
       name: user.name,
       avatarUrl: user.avatarUrl,
+      provider: user.provider,
       tier: user.tier,
       iat: now,
       exp: now + TOKEN_TTL_S,
@@ -107,6 +110,7 @@ export function verifyToken(token: string): AuthUser | null {
       email?: string;
       name?: string | null;
       avatarUrl?: string | null;
+      provider?: string;
       tier?: string;
       exp?: number;
     };
@@ -117,6 +121,7 @@ export function verifyToken(token: string): AuthUser | null {
       email: claims.email,
       name: claims.name ?? null,
       avatarUrl: claims.avatarUrl ?? null,
+      provider: claims.provider ?? "email",
       tier: claims.tier ?? "free",
     };
   } catch {
@@ -148,6 +153,7 @@ function toAuthUser(row: typeof users.$inferSelect): AuthUser {
     email: row.email,
     name: row.name,
     avatarUrl: row.avatarUrl,
+    provider: row.provider,
     tier: row.tier,
   };
 }
@@ -157,6 +163,7 @@ async function findOrCreateUser(
   database: Db,
   email: string,
   profile?: { name?: string | null; avatarUrl?: string | null },
+  provider?: "email" | "google",
 ): Promise<AuthUser> {
   const existing = await database
     .select()
@@ -169,6 +176,11 @@ async function findOrCreateUser(
     const patch: Partial<typeof users.$inferInsert> = { lastLoginAt: new Date() };
     // The admin address is authoritative: it always lands on the admin tier.
     if (email === adminEmail() && row.tier !== "admin") patch.tier = "admin";
+    if (provider) patch.provider = provider;
+    // The name belongs to the account holder once set: a later Google sign-in
+    // must not roll back a name they edited. The Google photo is refreshed.
+    if (profile?.name && !row.name) patch.name = profile.name;
+    if (profile?.avatarUrl) patch.avatarUrl = profile.avatarUrl;
     const updated = await database
       .update(users)
       .set(patch)
@@ -185,6 +197,7 @@ async function findOrCreateUser(
     email,
     name: profile?.name ?? null,
     avatarUrl: profile?.avatarUrl ?? null,
+    provider: provider ?? "email",
     tier: isAdmin ? "admin" : "free",
     lastLoginAt: new Date(),
   };
@@ -299,7 +312,7 @@ export async function verifyLoginCode(
   }
 
   await database.delete(authCodes).where(eq(authCodes.email, email));
-  const user = await findOrCreateUser(database, email);
+  const user = await findOrCreateUser(database, email, undefined, "email");
   return { token: signToken(user), user };
 }
 
@@ -312,7 +325,42 @@ export async function upsertExternalUser(
   if (!database) {
     throw new Error("Authentication requires DATABASE_URL to be configured.");
   }
-  const user = await findOrCreateUser(database, email, profile);
+  const user = await findOrCreateUser(database, email, profile, "google");
+  return { token: signToken(user), user };
+}
+
+const NAME_MAX = 60;
+
+/**
+ * Change the display name (the one field the account holder owns). Returns a
+ * fresh token because the name travels inside the JWT claims.
+ */
+export async function updateProfile(
+  userId: string,
+  patch: { name?: unknown },
+): Promise<{ token: string; user: AuthUser }> {
+  const database = getDb();
+  if (!database) {
+    throw new Error("Authentication requires DATABASE_URL to be configured.");
+  }
+
+  const rows = await database.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (rows.length === 0) throw new Error("Account not found.");
+
+  let name: string | null = rows[0]!.name;
+  if (patch.name !== undefined) {
+    if (typeof patch.name !== "string") throw new Error("That name is not valid.");
+    const trimmed = patch.name.trim().replace(/\s+/g, " ").slice(0, NAME_MAX);
+    if (/[\u0000-\u001f]/.test(trimmed)) throw new Error("That name is not valid.");
+    name = trimmed === "" ? null : trimmed;
+  }
+
+  const updated = await database
+    .update(users)
+    .set({ name })
+    .where(eq(users.id, userId))
+    .returning();
+  const user = toAuthUser(updated[0] ?? rows[0]!);
   return { token: signToken(user), user };
 }
 

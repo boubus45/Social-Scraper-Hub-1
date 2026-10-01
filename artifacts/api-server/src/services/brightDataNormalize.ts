@@ -218,7 +218,11 @@ function mediaOf(platform: string, item: Record<string, unknown>, context: Profi
 
   switch (platform) {
     case 'instagram': {
-      // Only image_url is returned, even for reels — a cover, not a video file.
+      // Reels carry a cover in image_url and the playable file in video_url
+      // (sometimes video_url_download). Try the video first so a reel plays
+      // instead of showing its cover; fall back to image_url for photo posts.
+      pushMedia(media, mediaItem(item.video_url, 'video'));
+      pushMedia(media, mediaItem(item.video_url_download, 'video'));
       pushMedia(media, mediaItem(item.image_url));
       break;
     }
@@ -241,9 +245,17 @@ function mediaOf(platform: string, item: Record<string, unknown>, context: Profi
       // author_profile_image is the avatar, not post media.
       const photos = Array.isArray(item.photos) ? item.photos : [];
       for (const photo of photos) pushMedia(media, mediaItem(photo));
+      // X video posts carry the playable file in video_url or a videos[] array
+      // of {url} objects; mediaItem rejects plain page links, so when no direct
+      // file is present the cover image is all that survives.
+      pushMedia(media, mediaItem(item.video_url, 'video'));
       const videos = Array.isArray(item.videos) ? item.videos : [];
       for (const video of videos) {
-        pushMedia(media, mediaItem(typeof video === 'object' ? (video as any).url : video, 'video'));
+        const url =
+          typeof video === 'object'
+            ? (video as any).url ?? (video as any).video_url
+            : video;
+        pushMedia(media, mediaItem(url, 'video'));
       }
       break;
     }

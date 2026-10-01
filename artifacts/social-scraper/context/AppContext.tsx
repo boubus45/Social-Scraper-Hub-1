@@ -24,6 +24,7 @@ import {
   loadSession,
   requestCode as requestAuthCode,
   saveSession,
+  updateAccountName as updateAccountNameApi,
   verifyCode as verifyAuthCode,
   type Session,
 } from '@/lib/authSession';
@@ -642,6 +643,8 @@ interface AppContextType {
   lastFetchError: string | null;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
   updatePlatformSettings: (platform: PlatformId, patch: Partial<AppSettings['platforms'][PlatformId]>) => Promise<void>;
+  /** Update the account's display name (syncs with backend & refreshes token). */
+  updateAccountName: (name: string) => Promise<Session>;
   fetchPosts: () => Promise<void>;
   postNow: (platform: PlatformId, content: string, redditTarget?: string) => Promise<PostResult>;
   startCompose: (post?: Post) => void;
@@ -850,6 +853,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // The cached feed belongs to the account that fetched it.
     setPosts([]);
     await AsyncStorage.removeItem(POSTS_KEY);
+  }, []);
+
+  const updateAccountName = useCallback(async (name: string) => {
+    const next = await updateAccountNameApi(name);
+    setSession(next);
+    return next;
   }, []);
 
   // The account decides the plan: mirror its tier into settings so anything
@@ -1247,7 +1256,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      settings, session, authBooted, requestCode, verifyCode, signInWithToken, signOut,
+      settings, session, authBooted, requestCode, verifyCode, signInWithToken, signOut, updateAccountName,
       posts, composedPost, isFetchingPosts, isRephrasing, lastFetchError,
       updateSettings, updatePlatformSettings, fetchPosts, postNow,
       startCompose, clearCompose, updateBaseContent, updatePlatformDraft,

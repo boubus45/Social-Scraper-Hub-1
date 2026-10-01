@@ -93,15 +93,33 @@ export async function notifyNewPosts(newPosts: Post[]): Promise<void> {
   }
 }
 
-/** Open the Feed when the user taps one of those notifications. */
+/**
+ * Open the Feed when the user taps one of those notifications.
+ *
+ * The listener only covers a tap on a running app. When the app was killed the
+ * tap that launched it is readable only as the *last* response, so that is
+ * checked once at start-up too.
+ */
 export function onNotificationOpened(onOpen?: () => void): { remove: () => void } {
   installHandler();
-  return Notifications.addNotificationResponseReceivedListener(() => {
+  const open = () => {
     try {
       router.navigate('/');
     } catch {
       /* router not ready yet */
     }
     onOpen?.();
-  });
+  };
+
+  const subscription = Notifications.addNotificationResponseReceivedListener(open);
+
+  void Notifications.getLastNotificationResponseAsync()
+    .then(response => {
+      if (response) open();
+    })
+    .catch(() => {
+      // Not every platform exposes the last response.
+    });
+
+  return subscription;
 }

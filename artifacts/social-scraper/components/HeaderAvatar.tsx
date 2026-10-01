@@ -9,13 +9,21 @@ interface HeaderAvatarProps {
 }
 
 export function HeaderAvatar({ size = 34, onPress }: HeaderAvatarProps) {
-  const { settings } = useApp();
+  const { settings, session } = useApp();
   const colors = useColors();
-  const initial = settings.profile.name?.trim()?.[0]?.toUpperCase() ?? '?';
 
-  const inner = settings.profile.avatarUri ? (
+  // The account photo (Google or a locally picked one) wins; the initial falls
+  // back to the account name, then the email, then the local profile.
+  const avatarUri = session?.avatarUrl || settings.profile.avatarUri || null;
+  const initial =
+    session?.name?.trim()?.[0]?.toUpperCase()
+    ?? session?.email?.[0]?.toUpperCase()
+    ?? settings.profile.name?.trim()?.[0]?.toUpperCase()
+    ?? '?';
+
+  const inner = avatarUri ? (
     <Image
-      source={{ uri: settings.profile.avatarUri }}
+      source={{ uri: avatarUri }}
       style={{ width: size, height: size, borderRadius: size / 2 }}
     />
   ) : (
