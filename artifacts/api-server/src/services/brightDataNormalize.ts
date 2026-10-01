@@ -57,8 +57,12 @@ export interface NormalizedProfile {
   posts: ProfilePost[];
 }
 
-const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|avif)(\?|#|$)/i;
-const VIDEO_EXT = /\.(mp4|m4v|webm|mov)(\?|#|$)/i;
+const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp|avif|heic)(\?|#|$)/i;
+const VIDEO_EXT = /\.(mp4|m4v|webm|mov|mkv)(\?|#|$)/i;
+
+/** Known direct-media CDN hosts — if the URL is on one of these, treat it as
+ *  media even without a recognizable extension. */
+const MEDIA_CDN_HOSTS = /cdninstagram|fbcdn|tiktokcdn|twimg|ggpht|ytimg|scontent|pbs\.twimg|video\.twimg|vcdn|akamaized|cloudfront/i;
 
 function asNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -92,7 +96,7 @@ function mediaItem(url: unknown, forceType?: 'image' | 'video'): MediaItem | und
   if (VIDEO_EXT.test(value)) return { type: 'video', url: value };
   if (IMAGE_EXT.test(value)) return { type: 'image', url: value };
   // CDN hosts without an extension are still direct media.
-  if (/cdninstagram|fbcdn|tiktokcdn|twimg|ggpht|ytimg/i.test(value)) {
+  if (MEDIA_CDN_HOSTS.test(value)) {
     return { type: forceType ?? 'image', url: value };
   }
   return undefined;
