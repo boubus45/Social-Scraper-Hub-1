@@ -42,9 +42,12 @@ jobs:
         id: login
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_ACCESS_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           if [ -z "$EXPO_TOKEN" ]; then echo "EXPO_TOKEN secret is required"; exit 1; fi
-          eas login --token "$EXPO_TOKEN"
+          # eas login --token was removed from the CLI; it now reads the
+          # token from EXPO_TOKEN/EXPO_ACCESS_TOKEN in the environment.
+          eas login
           echo "logged_in=true" >> $GITHUB_OUTPUT
 
       - name: Run EAS build (android) and download artifact
