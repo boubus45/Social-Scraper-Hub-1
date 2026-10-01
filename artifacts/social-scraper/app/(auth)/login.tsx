@@ -69,7 +69,7 @@ export default function LoginScreen() {
     setGoogleBusy(true);
     try {
       const url = await fetchGoogleAuthUrl();
-      const result = await WebBrowser.openAuthSessionAsync(url, 'socialscraper://auth');
+      const result = await WebBrowser.openAuthSessionAsync(url, 'social-scraper://auth');
       if (result.type !== 'success') return; // cancelled or dismissed
       const token = /[?&]token=([^&]+)/.exec(result.url)?.[1];
       if (token) {

@@ -88,7 +88,7 @@ router.get("/auth/providers", (_req, res) => {
 
 // ─── Google sign-in (staged: works once GOOGLE_CLIENT_ID/SECRET are set) ────
 // The browser round-trips through this server (which holds the client secret)
-// and is finally handed to the app as socialscraper://auth?token=…
+// and is finally handed to the app as social-scraper://auth?token=…
 
 const googleStates = new Map<string, number>();
 
@@ -107,12 +107,12 @@ router.post("/auth/google/auth-url", (_req, res) => {
   url.searchParams.set("scope", "openid email profile");
   url.searchParams.set("state", state);
   url.searchParams.set("prompt", "select_account");
-  return res.json({ url: url.toString(), redirectUri: "socialscraper://auth" });
+  return res.json({ url: url.toString(), redirectUri: "social-scraper://auth" });
 });
 
 router.get("/auth/google/callback", async (req, res) => {
   const redirect = (query: Record<string, string>) => {
-    const target = new URL("socialscraper://auth");
+    const target = new URL("social-scraper://auth");
     for (const [key, value] of Object.entries(query)) target.searchParams.set(key, value);
     return res.redirect(302, target.toString());
   };
