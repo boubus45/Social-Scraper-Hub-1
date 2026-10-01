@@ -42,6 +42,22 @@ export interface NormalizedPost {
   publishedAt?: string;
   media: MediaItem[];
   metrics: PostMetrics;
+  /** Human-readable author name (display name). */
+  author?: string;
+  /** @-prefixed handle. */
+  authorHandle?: string;
+  /** Source key for grouping (e.g. "x:account:nasa"). */
+  sourceKey?: string;
+  /** Display label for the source. */
+  sourceLabel?: string;
+  /** "account" | "subreddit" | "page" | "channel" … */
+  sourceKind?: string;
+  /** True if this post arrived in the last fetch. */
+  isNew?: boolean;
+  /** True if from an official/verified account. */
+  isOfficial?: boolean;
+  /** Media with explicit type tags (image/video). */
+  mediaItems?: MediaItem[];
 }
 
 export interface NormalizedProfile {
@@ -287,6 +303,78 @@ function textOf(platform: string, item: Record<string, unknown>): string {
   return '';
 }
 
+/** Post author display name. */
+function authorOf(platform: string, item: Record<string, unknown>): string | undefined {
+  const rec = item as Record<string, unknown>;
+  return firstString(
+    rec.author_name,
+    rec.author_display_name,
+    rec.full_name,
+    rec.name,
+    (rec.account as Record<string, unknown>)?.full_name,
+    (rec.account as Record<string, unknown>)?.name,
+    rec.username,
+    (rec.account as Record<string, unknown>)?.username,
+  );
+}
+
+/** @-prefixed author handle. */
+function authorHandleOf(platform: string, item: Record<string, unknown>): string | undefined {
+  const rec = item as Record<string, unknown>;
+  const raw = firstString(
+    rec.author_handle,
+    rec.author_username,
+    rec.handle,
+    rec.username,
+    (rec.account as Record<string, unknown>)?.username,
+    (rec.account as Record<string, unknown>)?.id,
+  );
+  if (!raw) return undefined;
+  return raw.startsWith('@') || raw.startsWith('u/') ? raw : `@${raw}`;
+}
+
+/** Human-readable source label (e.g. "@nasa" or "r/programming"). */
+function sourceLabelOf(platform: string, item: Record<string, unknown>): string | undefined {
+  const rec = item as Record<string, unknown>;
+  return firstString(
+    rec.source_label,
+    rec.source_label_text,
+    rec.author_handle,
+    rec.author_username,
+    rec.handle,
+    rec.username,
+    (rec.account as Record<string, unknown>)?.username,
+  );
+}
+
+/** Source key for grouping (e.g. "x:account:nasa"). */
+function sourceKeyOf(platform: string, item: Record<string, unknown>, fallbackUsername: string): string {
+  const rec = item as Record<string, unknown>;
+  const handle = firstString(
+    rec.author_handle,
+    rec.author_username,
+    rec.handle,
+    rec.username,
+    (rec.account as Record<string, unknown>)?.username,
+  );
+  return `${platform}:account:${handle ?? fallbackUsername}`;
+}
+
+/** Source kind: "account" | "subreddit" | "page" | "channel" … */
+function sourceKindOf(platform: string, item: Record<string, unknown>): string {
+  if (platform === 'reddit') return (item as Record<string, unknown>).is_user ? 'user' : 'subreddit';
+  if (platform === 'facebook') return 'page';
+  if (platform === 'youtube') return 'channel';
+  return 'account';
+}
+
+/** True if the post is from an official/verified account. */
+function isOfficialPost(platform: string, item: Record<string, unknown>): boolean {
+  const rec = item as Record<string, unknown>;
+  const verified = rec.is_verified ?? (rec.account as Record<string, unknown>)?.is_verified ?? rec.verified;
+  return verified === true;
+}
+
 const MONTH_NAMES = [
   'jan', 'feb', 'mar', 'apr', 'may', 'jun',
   'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
@@ -461,6 +549,13 @@ export function normalizeFeedRecords(
         publishedAt: publishedAtOf(item) ?? snowflakeTimestamp(platform, id),
         media: mediaOf(platform, item, context),
         metrics: metricsOf(platform, item, context),
+        author: authorOf(platform, item),
+        authorHandle: authorHandleOf(platform, item),
+        sourceKey: sourceKeyOf(platform, item, recordUsername),
+        sourceLabel: sourceLabelOf(platform, item),
+        sourceKind: sourceKindOf(platform, item),
+        isOfficial: isOfficialPost(platform, item),
+        mediaItems: mediaOf(platform, item, context).map(m => ({ type: m.type, url: m.url })),
       });
     }
   }
