@@ -12,6 +12,7 @@ import {
 } from "../services/brightDataCollection";
 import { fetchProfile } from "../services/brightDataUnified";
 import { supportsPlatform } from "../services/brightDataDatasets";
+import { authUser } from "../middleware/auth";
 
 const router: IRouter = Router();
 
@@ -112,35 +113,42 @@ router.get("/platforms", (_req, res) => {
 
 // ─── Source Management ────────────────────────────────────────────────────
 
+/** Per-tier account caps; the tier comes from the signed-in account, never
+ *  from the request body. 'admin' (the owner account) is unlimited. */
+const ACCOUNT_LIMITS: Record<string, number> = {
+  free: 3,
+  pro: 10,
+  "mega-pro": 20,
+  admin: Infinity,
+};
+
 router.post("/sources", (req, res) => {
   try {
     ensureInitialized();
-    const { platform, username, userId, plan } = req.body as {
+    const { platform, username } = req.body as {
       platform: string;
       username: string;
-      userId: string;
-      plan?: string;
     };
+    const user = authUser(req);
+    if (!user) return res.status(401).json({ error: "Sign in required." });
 
-    if (!platform || !username || !userId) {
-      return res.status(400).json({ error: "platform, username, and userId required" });
+    if (!platform || !username) {
+      return res.status(400).json({ error: "platform and username required" });
     }
 
     if (!supportsPlatform(platform as any)) {
       return res.status(400).json({ error: `Platform ${platform} is not supported via Bright Data` });
     }
 
-    // Check plan limits (simplified)
-    const limits: Record<string, number> = { free: 3, pro: 25, mega: 50, ultra: 100 };
-    const limit = limits[plan ?? "free"] ?? 3;
-    const existing = getSubscribedSources(userId);
+    const limit = ACCOUNT_LIMITS[user.tier] ?? ACCOUNT_LIMITS.free!;
+    const existing = getSubscribedSources(user.id);
     if (existing.length >= limit) {
       return res.status(400).json({
         error: `Plan limit reached (${limit} accounts). Upgrade to add more.`,
       });
     }
 
-    const source = subscribeToSource(userId, platform as any, username);
+    const source = subscribeToSource(user.id, platform as any, username);
     // `subscription` is kept for older clients; new clients should read `source.id`.
     return res.status(201).json({ source, subscription: { sourceId: source.id } });
   } catch (error) {
@@ -152,10 +160,10 @@ router.delete("/sources/:platform/:username", (req, res) => {
   try {
     ensureInitialized();
     const { platform, username } = req.params;
-    const { userId } = req.body as { userId: string };
-    if (!userId) return res.status(400).json({ error: "userId required" });
+    const user = authUser(req);
+    if (!user) return res.status(401).json({ error: "Sign in required." });
 
-    const ok = unsubscribeFromSource(userId, platform as any, username);
+    const ok = unsubscribeFromSource(user.id, platform as any, username);
     if (!ok) return res.status(404).json({ error: "Subscription not found" });
 
     return res.json({ ok: true });
@@ -166,9 +174,10 @@ router.delete("/sources/:platform/:username", (req, res) => {
 
 router.get("/sources", (req, res) => {
   ensureInitialized();
-  const userId = typeof req.query.userId === "string" ? req.query.userId : "local-user";
-  const subs = getSubscribedSources(userId);
-  res.json({ sources: subs });
+  const user = authUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in required." });
+  const subs = getSubscribedSources(user.id);
+  return res.json({ sources: subs });
 });
 
 router.get("/sources/all", (_req, res) => {
@@ -180,9 +189,10 @@ router.get("/sources/all", (_req, res) => {
 
 router.get("/feed", (req, res) => {
   ensureInitialized();
-  const userId = typeof req.query.userId === "string" ? req.query.userId : "local-user";
-  const feed = getUserFeed(userId);
-  res.json({ posts: feed });
+  const user = authUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in required." });
+  const feed = getUserFeed(user.id);
+  return res.json({ posts: feed });
 });
 
 // ─── Status ───────────────────────────────────────────────────────────────

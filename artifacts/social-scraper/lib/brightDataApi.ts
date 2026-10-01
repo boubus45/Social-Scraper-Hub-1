@@ -1,12 +1,25 @@
 import { Post, PlatformId } from "@/types";
 import { API_BASE_URL } from "@/lib/apiConfig";
+import { authHeaders, currentUserId } from "@/lib/authSession";
 
+/**
+ * Fallback only: the backend derives the account from the Bearer token, so
+ * this matters solely for endpoints that echo a body/query userId (OAuth).
+ */
 const DEFAULT_USER_ID = "local-user";
+
+function resolveUserId(userId?: string): string {
+  return userId ?? currentUserId() ?? DEFAULT_USER_ID;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders()),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!response.ok) {
     const body = await response.text();
@@ -149,7 +162,7 @@ export async function checkStatus(): Promise<{
 export async function subscribeToSource(
   platform: string,
   username: string,
-  userId: string = DEFAULT_USER_ID,
+  userId: string = resolveUserId(),
   plan?: string,
 ): Promise<{ sourceId: string }> {
   const data = await request<{ source?: { id: string }; subscription?: { sourceId: string } }>(
@@ -167,7 +180,7 @@ export async function subscribeToSource(
 export async function unsubscribeSource(
   platform: string,
   username: string,
-  userId: string = DEFAULT_USER_ID,
+  userId: string = resolveUserId(),
 ): Promise<boolean> {
   const data = await request<{ ok: boolean }>(
     `/api/brightdata/sources/${encodeURIComponent(platform)}/${encodeURIComponent(username)}`,
@@ -176,14 +189,14 @@ export async function unsubscribeSource(
   return !!data.ok;
 }
 
-export async function listSources(userId: string = DEFAULT_USER_ID): Promise<BrightDataSource[]> {
+export async function listSources(userId: string = resolveUserId()): Promise<BrightDataSource[]> {
   const data = await request<{ sources: BrightDataSource[] }>(
     `/api/brightdata/sources?userId=${encodeURIComponent(userId)}`,
   );
   return data.sources ?? [];
 }
 
-export async function fetchBrightDataFeed(userId: string = DEFAULT_USER_ID): Promise<Post[]> {
+export async function fetchBrightDataFeed(userId: string = resolveUserId()): Promise<Post[]> {
   const data = await request<{ posts: FeedPost[] }>(
     `/api/brightdata/feed?userId=${encodeURIComponent(userId)}`,
   );
@@ -191,12 +204,19 @@ export async function fetchBrightDataFeed(userId: string = DEFAULT_USER_ID): Pro
 }
 
 /** Fire-and-forget: ask the backend to run an immediate collection for a source. */
-function triggerImmediateCollection(platform: PlatformId, username: string): void {
+async function triggerImmediateCollection(platform: PlatformId, username: string): Promise<void> {
   if (!ON_DEMAND_PLATFORMS.includes(platform)) return;
-  void fetch(
-    `${API_BASE_URL}/api/brightdata/collect/${encodeURIComponent(platform)}/${encodeURIComponent(username)}`,
-    { method: "POST", headers: { "Content-Type": "application/json" } },
-  ).catch(() => { /* the hourly loop still runs */ });
+  try {
+    await fetch(
+      `${API_BASE_URL}/api/brightdata/collect/${encodeURIComponent(platform)}/${encodeURIComponent(username)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+      },
+    );
+  } catch {
+    // the hourly loop still runs
+  }
 }
 
 export interface SyncResult {
@@ -212,7 +232,7 @@ export interface SyncResult {
  */
 export async function syncBrightDataSources(
   wanted: Array<{ platform: PlatformId; username: string }>,
-  userId: string = DEFAULT_USER_ID,
+  userId: string = resolveUserId(),
 ): Promise<SyncResult> {
   const result: SyncResult = { subscribed: [], unsubscribed: [], warnings: [] };
   const wantedKeys = new Set(wanted.map(w => `${w.platform}:${w.username.toLowerCase()}`));
@@ -235,7 +255,7 @@ export async function syncBrightDataSources(
         result.subscribed.push(`${item.platform}/${item.username}`);
         const source = existing.find(s => s.id === sourceId);
         if (!source?.lastCollectedAt) {
-          triggerImmediateCollection(item.platform, item.username);
+          void triggerImmediateCollection(item.platform, item.username);
         }
       }
     } catch (error) {

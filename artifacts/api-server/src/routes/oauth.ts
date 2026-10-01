@@ -6,6 +6,7 @@ import {
   isConnected,
   getToken,
 } from "../services/oauthService";
+import { authUser } from "../middleware/auth";
 
 const router: IRouter = Router();
 
@@ -100,12 +101,13 @@ router.get("/oauth/:platform/auth-url", (req, res): void => {
 router.post("/oauth/:platform/callback", async (req, res) => {
   try {
     const platform = req.params.platform;
-    const { code, userId, codeVerifier, state } = req.body as {
+    const { code, codeVerifier, state } = req.body as {
       code: string;
-      userId: string;
       codeVerifier?: string;
       state?: string;
     };
+    // Token first; the body keeps a fallback for older clients.
+    const userId = authUser(req)?.id ?? (req.body as { userId?: string })?.userId;
 
     if (!code) {
       return res.status(400).json({ error: "Authorization code required." });
@@ -132,7 +134,9 @@ router.post("/oauth/:platform/callback", async (req, res) => {
 // Checks connection status for a platform
 router.get("/oauth/:platform/status", (req, res) => {
   const platform = req.params.platform;
-  const userId = typeof req.query.userId === "string" ? req.query.userId : "local-user";
+  const userId =
+    authUser(req)?.id ??
+    (typeof req.query.userId === "string" ? req.query.userId : "local-user");
   const connected = isConnected(userId, platform);
   const token = getToken(userId, platform);
   const configured = !!OAUTH_APPS[platform];
@@ -147,7 +151,9 @@ router.get("/oauth/:platform/status", (req, res) => {
 // Disconnects a platform (revokes by clearing the token)
 router.delete("/oauth/:platform", (req, res) => {
   const platform = req.params.platform;
-  const userId = typeof req.body?.userId === "string" ? req.body.userId : "local-user";
+  const userId =
+    authUser(req)?.id ??
+    (typeof req.body?.userId === "string" ? req.body.userId : "local-user");
   clearToken(userId, platform);
   res.json({ ok: true, disconnected: true });
 });
@@ -155,7 +161,9 @@ router.delete("/oauth/:platform", (req, res) => {
 // Internal: get a valid (refreshed) token for posting
 router.post("/oauth/:platform/token", async (req, res): Promise<void> => {
   const platform = req.params.platform;
-  const userId = typeof req.body?.userId === "string" ? req.body.userId : "local-user";
+  const userId =
+    authUser(req)?.id ??
+    (typeof req.body?.userId === "string" ? req.body.userId : "local-user");
   const token = await refreshTokenIfNeeded(platform, userId);
   if (!token) {
     res.status(401).json({ error: "Not connected. Re-authorize in Settings." });

@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PlatformId, Post } from "@/types";
 import { API_BASE_URL } from "@/lib/apiConfig";
+import { authHeaders, currentUserId } from "@/lib/authSession";
 
 const MONITOR_ID_KEY = "@socialscraper/reddit-monitor-id";
 
@@ -14,7 +15,11 @@ interface Record {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders()),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!response.ok) {
     const body = await response.text();
@@ -56,7 +61,12 @@ export async function refreshRedditMonitor(
   credentials?: { clientId?: string; clientSecret?: string; username?: string; password?: string },
 ) {
   if (accounts.length === 0) throw new Error("Add at least one Reddit subreddit or user before refreshing.");
-  const payload = { userId: "local-user", accounts, limit: 10, enabled: true };
+  const payload = {
+    userId: currentUserId() ?? "local-user",
+    accounts,
+    limit: 10,
+    enabled: true,
+  };
   let monitor: { id: string };
   if (existingMonitorId) {
     try {

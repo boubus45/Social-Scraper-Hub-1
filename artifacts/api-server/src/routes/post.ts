@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { PLATFORM_POSTERS, PostResult } from "../services/platformPosters";
 import { isConnected } from "../services/oauthService";
+import { authUser } from "../middleware/auth";
 
 const router: IRouter = Router();
 
@@ -8,11 +9,16 @@ const router: IRouter = Router();
 router.post("/post/:platform", async (req, res) => {
   try {
     const platform = req.params.platform;
-    const { content, userId, subreddit } = req.body as {
+    const { content, subreddit } = req.body as {
       content: string;
-      userId: string;
       subreddit?: string;
     };
+    // The signed-in account owns the connection; a body cannot post as someone
+    // else.
+    const userId = authUser(req)?.id;
+    if (!userId) {
+      return res.status(401).json({ error: "Sign in required." });
+    }
 
     if (!content) {
       return res.status(400).json({ error: "Content required." });

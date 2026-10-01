@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PlatformId, Post } from "@/types";
 import { API_BASE_URL } from "@/lib/apiConfig";
+import { authHeaders, currentUserId } from "@/lib/authSession";
 
 const MONITOR_ID_KEY = "@socialscraper/facebook-monitor-id";
 
@@ -14,7 +15,11 @@ interface Record {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders()),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!response.ok) {
     const body = await response.text();
@@ -62,7 +67,12 @@ export async function refreshFacebookMonitor(
     throw new Error("Add at least one Facebook page before refreshing.");
   }
 
-  const payload = { userId: "local-user", pages: normalizedPages, limit: 10, enabled: true };
+  const payload = {
+    userId: currentUserId() ?? "local-user",
+    pages: normalizedPages,
+    limit: 10,
+    enabled: true,
+  };
   let monitor: { id: string };
   if (existingMonitorId) {
     try {

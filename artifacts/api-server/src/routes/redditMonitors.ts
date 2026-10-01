@@ -7,12 +7,17 @@ import {
   startRedditRun,
   updateRedditMonitor,
 } from "../services/redditMonitor";
+import { authUser } from "../middleware/auth";
 
 const router: IRouter = Router();
 
 router.post("/monitors/reddit", (req, res) => {
   try {
-    return res.status(201).json({ monitor: createRedditMonitor(req.body) });
+    const body = {
+      ...(req.body && typeof req.body === "object" ? req.body : {}),
+      userId: authUser(req)?.id,
+    };
+    return res.status(201).json({ monitor: createRedditMonitor(body) });
   } catch (error) {
     return res.status(400).json({ error: error instanceof Error ? error.message : "Invalid monitor." });
   }

@@ -1,6 +1,7 @@
 import { PlatformId, Post } from '@/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '@/lib/apiConfig';
+import { authHeaders, currentUserId } from '@/lib/authSession';
 
 const MONITOR_ID_KEY = '@socialscraper/instagram-monitor-id';
 
@@ -31,7 +32,11 @@ function requireApiUrl(): string {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${requireApiUrl()}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await authHeaders()),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!response.ok) {
     const body = await response.text();
@@ -80,7 +85,8 @@ export async function refreshInstagramMonitor(
   }
 
   const payload = {
-    userId: 'local-user',
+    userId: currentUserId() ?? 'local-user',
+    // The backend overrides this with the signed-in account's tier.
     plan: 'free',
     accounts: normalizedAccounts,
     frequency: 'daily',

@@ -7,19 +7,29 @@ import {
   getMonitorByRunId,
   ingestApifyRun,
   listMonitors,
+  planForTier,
   startApifyRun,
   updateMonitor,
 } from "../services/instagramMonitor";
+import { authUser } from "../middleware/auth";
 
 const router: IRouter = Router();
 
 router.get("/monitors/instagram", (req, res) => {
-  res.json({ monitors: listMonitors(typeof req.query.userId === "string" ? req.query.userId : "local-user") });
+  const user = authUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in required." });
+  return res.json({ monitors: listMonitors(user.id) });
 });
 
 router.post("/monitors/instagram", (req, res) => {
   try {
-    res.status(201).json({ monitor: createMonitor(req.body) });
+    // Identity and plan come from the token, not the body.
+    const body = {
+      ...(req.body && typeof req.body === "object" ? req.body : {}),
+      userId: authUser(req)?.id,
+      plan: planForTier(authUser(req)?.tier),
+    };
+    res.status(201).json({ monitor: createMonitor(body) });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Invalid monitor." });
   }

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -15,7 +15,7 @@ import {
   useFonts,
 } from '@expo-google-fonts/inter';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, Stack } from 'expo-router';
+import { router, Stack, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 
 SplashScreen.preventAutoHideAsync();
@@ -64,27 +64,57 @@ function StackHeaderAvatar() {
 }
 
 function RootLayoutNav() {
+  const { session, authBooted } = useApp();
+  const segments = useSegments();
+  const inAuthGroup = segments[0] === '(auth)';
+
+  // The splash covers everything until fonts (RootLayout) *and* the stored
+  // session are ready, so the first visible frame is already the right screen.
+  useEffect(() => {
+    if (authBooted) SplashScreen.hideAsync();
+  }, [authBooted]);
+
+  // Signed out → login is the first screen; signed in → the feed. Sign-in
+  // screens move on by themselves once verifyCode stores the session.
+  useEffect(() => {
+    if (!authBooted) return;
+    if (!session && !inAuthGroup) router.replace('/(auth)/login');
+    else if (session && inAuthGroup) router.replace('/');
+  }, [authBooted, session, inAuthGroup]);
+
+  // Rendered during the frame between "session restored" and "redirect applied"
+  // so the feed never flashes to a signed-out user.
+  const gateVisible = authBooted && !session && !inAuthGroup;
+
   return (
-    <Stack
-      screenOptions={{
-        headerStyle: { backgroundColor: '#0D0D14' },
-        headerTintColor: '#F0F0FF',
-        headerTitleStyle: { fontFamily: 'Inter_600SemiBold', fontSize: 17 },
-        contentStyle: { backgroundColor: '#0D0D14' },
-        headerLeft: () => <StackHeaderLogo />,
-        headerRight: () => <StackHeaderAvatar />,
-      }}
-    >
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen
-        name="edit/[postId]"
-        options={{ title: 'Compose Post', headerBackTitle: 'Feed' }}
-      />
-      <Stack.Screen
-        name="preview/index"
-        options={{ title: 'Preview & Post', headerBackTitle: 'Edit' }}
-      />
-    </Stack>
+    <>
+      <Stack
+        screenOptions={{
+          headerStyle: { backgroundColor: '#0D0D14' },
+          headerTintColor: '#F0F0FF',
+          headerTitleStyle: { fontFamily: 'Inter_600SemiBold', fontSize: 17 },
+          contentStyle: { backgroundColor: '#0D0D14' },
+          headerLeft: () => <StackHeaderLogo />,
+          headerRight: () => <StackHeaderAvatar />,
+        }}
+      >
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="edit/[postId]"
+          options={{ title: 'Compose Post', headerBackTitle: 'Feed' }}
+        />
+        <Stack.Screen
+          name="preview/index"
+          options={{ title: 'Preview & Post', headerBackTitle: 'Edit' }}
+        />
+      </Stack>
+      {gateVisible ? (
+        <View style={[styles.authGate, { backgroundColor: '#0D0D14' }]}>
+          <ActivityIndicator color="#6366F1" />
+        </View>
+      ) : null}
+    </>
   );
 }
 
@@ -100,13 +130,7 @@ export default function RootLayout() {
     ...MaterialCommunityIcons.font,
   });
 
-  useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded, fontError]);
-
-  if (!fontsLoaded && !fontError) return null;
+  if (!fontsLoaded && !fontError) return null; // splash stays visible until the fonts are in
 
   return (
     <SafeAreaProvider>
@@ -131,4 +155,12 @@ const stackStyles = StyleSheet.create({
   avatarBtn: { marginRight: 4, padding: 2 },
   avatarPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   avatarInitial: { fontFamily: 'Inter_600SemiBold', fontSize: 13 },
+});
+
+const styles = StyleSheet.create({
+  authGate: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-export type InstagramPlan = "free" | "pro" | "mega";
+export type InstagramPlan = "free" | "pro" | "mega" | "admin";
 export type InstagramFrequency = "1h" | "3h" | "6h" | "daily";
 
 export interface InstagramMonitor {
@@ -49,7 +49,17 @@ const PLAN_LIMITS: Record<
   free: { accounts: 3, frequencies: ["daily"], maxPosts: 2 },
   pro: { accounts: 10, frequencies: ["6h", "daily"], maxPosts: 10 },
   mega: { accounts: 20, frequencies: ["1h", "3h", "6h", "daily"], maxPosts: 20 },
+  // Owner account: no cap on accounts, every cadence allowed.
+  admin: { accounts: Infinity, frequencies: ["1h", "3h", "6h", "daily"], maxPosts: 50 },
 };
+
+/** Account tier (from the signed-in user) → this service's plan vocabulary. */
+export function planForTier(tier: string | undefined): InstagramPlan {
+  if (tier === "admin") return "admin";
+  if (tier === "pro") return "pro";
+  if (tier === "mega-pro") return "mega";
+  return "free";
+}
 
 const monitors = new Map<string, InstagramMonitor>();
 const feed = new Map<string, InstagramPostRecord[]>();
@@ -65,7 +75,10 @@ export function validateMonitorInput(input: unknown): Omit<InstagramMonitor, "id
 
   const body = input as Record<string, unknown>;
   const userId = typeof body.userId === "string" && body.userId.trim() ? body.userId.trim() : "local-user";
-  const plan = body.plan === "pro" || body.plan === "mega" ? body.plan : "free";
+  const plan =
+    body.plan === "pro" || body.plan === "mega" || body.plan === "admin"
+      ? body.plan
+      : "free";
   const frequency = body.frequency;
   const accounts = Array.isArray(body.accounts)
     ? [...new Set(body.accounts.filter((account): account is string => typeof account === "string").map(normalizeUsername))]

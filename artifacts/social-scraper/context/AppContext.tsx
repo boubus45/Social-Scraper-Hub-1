@@ -18,9 +18,19 @@ import { notifyNewPosts, onNotificationOpened } from '@/lib/notifications';
 import { API_BASE_URL } from '@/lib/apiConfig';
 import type { SubscriptionLimits, SubscriptionTier } from '@/types/subscription';
 import { SUBSCRIPTION_TIERS } from '@/types/subscription';
+import {
+  authHeaders,
+  fetchCurrentUser,
+  loadSession,
+  requestCode as requestAuthCode,
+  saveSession,
+  verifyCode as verifyAuthCode,
+  type Session,
+} from '@/lib/authSession';
 
 /** How often the feed may refresh, per plan — `minScrapeInterval` in types/subscription.ts. */
 const PLAN_REFRESH_MS: Record<SubscriptionLimits['minScrapeInterval'], number> = {
+  instant: 0,
   daily: 24 * 60 * 60 * 1000,
   '6h': 6 * 60 * 60 * 1000,
   '3h': 3 * 60 * 60 * 1000,
@@ -28,12 +38,12 @@ const PLAN_REFRESH_MS: Record<SubscriptionLimits['minScrapeInterval'], number> =
 };
 
 /**
- * TESTING SWITCH: every plan refreshes the feed the moment the app is opened,
- * so plans can be exercised without waiting out daily/6h/1h. While it is on,
- * no refresh timer is armed at all — opening the app *is* the refresh — so
- * nothing can loop. Flip to false to enforce the plan cadences again.
+ * Production behaviour: cadences come from the signed-in account's tier —
+ * free daily, Pro 6h, Mega Pro hourly, admin instant (0 → no timer, refresh on
+ * open). Set to true only to test cadences without waiting them out, which
+ * forces every plan to refresh the moment the app is used.
  */
-const INSTANT_FEED_REFRESH = true;
+const INSTANT_FEED_REFRESH = false;
 
 /** Milliseconds until the next fetch: 0 means "next time the app is used". */
 function feedRefreshDelayMs(tier?: SubscriptionTier): number {
@@ -616,6 +626,15 @@ async function rephraseWithGemini(content: string, platform: PlatformId, tone: A
 // ─── Context ──────────────────────────────────────────────────────────────
 interface AppContextType {
   settings: AppSettings;
+  /** Signed-in account, or null while signed out / still restoring. */
+  session: Session | null;
+  /** True once the stored session has been read (the route guard waits for it). */
+  authBooted: boolean;
+  requestCode: (email: string) => Promise<{ delivery: 'email' | 'log'; expiresInSec: number }>;
+  verifyCode: (email: string, code: string) => Promise<Session>;
+  /** Adopt a token produced by an external flow (Google) as this session. */
+  signInWithToken: (token: string) => Promise<Session>;
+  signOut: () => Promise<void>;
   posts: Post[];
   composedPost: ComposedPost | null;
   isFetchingPosts: boolean;
@@ -655,9 +674,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isRephrasing, setIsRephrasing] = useState(false);
   const [lastFetchError, setLastFetchError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [authBooted, setAuthBooted] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const sessionRef = useRef<Session | null>(null);
+  sessionRef.current = session;
   const postsRef = useRef(posts);
   postsRef.current = posts;
   const composedPostRef = useRef(composedPost);
@@ -677,23 +700,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const scheduleNextFetch = useCallback((delayMs: number) => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = null;
-    if (delayMs <= 0) return; // instant/testing mode — no timer to arm
+    if (delayMs <= 0) return; // instant plan — no timer to arm
     refreshTimerRef.current = setTimeout(() => {
       refreshTimerRef.current = null;
       void fetchPostsRef.current();
     }, delayMs);
   }, []);
 
+  /** Cadence follows the signed-in account; the local copy of the tier is display-only. */
+  const currentTier = useCallback((): SubscriptionTier =>
+    (sessionRef.current?.tier as SubscriptionTier | undefined) ?? settingsRef.current.subscriptionTier,
+  []);
+
   /**
    * One rule shared by every refresh trigger (plan timer, cold launch,
    * foreground return): the plan's interval must have passed since the last
-   * fetch, with MIN_REFRESH_GAP_MS as a floor. While the testing switch is on
-   * the plan asks for 0 ms, so only the 60 s floor applies and every plan
-   * refreshes the moment the app is used.
+   * fetch, with MIN_REFRESH_GAP_MS as a floor. Admin's 'instant' plan asks for
+   * 0 ms, so only the floor applies and opening the app refreshes the feed.
    */
   const refreshAllowed = useCallback(() => {
-    const planDelay = feedRefreshDelayMs(settingsRef.current.subscriptionTier);
+    const planDelay = feedRefreshDelayMs(currentTier());
     return Date.now() - lastFetchAtRef.current >= Math.max(planDelay, MIN_REFRESH_GAP_MS);
+  }, [currentTier]);
+
+  // Restore the session before anything network-bound runs: the root layout's
+  // guard sends signed-out users to the login screen once authBooted flips.
+  useEffect(() => {
+    (async () => {
+      try {
+        const restored = await loadSession();
+        setSession(restored);
+      } catch {
+        setSession(null);
+      } finally {
+        setAuthBooted(true);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -726,9 +768,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             // `fetchFrequency` was removed — the backend collects hourly, so the
             // interval control went with it. Drop any stored copy rather than
             // carrying a dead setting around.
-            const stored = { ...(parsed as AppSettings & { fetchFrequency?: string }) };
+            const stored = {
+              ...(parsed as AppSettings & { fetchFrequency?: string }),
+            };
             delete stored.fetchFrequency;
-            return { ...prev, ...stored, platforms: mergedPlatforms };
+            return {
+              ...prev,
+              ...stored,
+              // The tier belongs to the signed-in account (the sync effect
+              // writes it in): never let a stored copy win over it.
+              subscriptionTier: prev.subscriptionTier,
+              platforms: mergedPlatforms,
+            };
           });
         }
         const postsRaw = await AsyncStorage.getItem(POSTS_KEY);
@@ -773,7 +824,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await saveSettings(next);
   }, [saveSettings]);
 
+  // ─── Sign-in / sign-out ──────────────────────────────────────────────────
+  const requestCode = useCallback(
+    (email: string) => requestAuthCode(email),
+    [],
+  );
+
+  const verifyCode = useCallback(async (email: string, code: string) => {
+    const next = await verifyAuthCode(email, code);
+    setSession(next);
+    return next;
+  }, []);
+
+  const signInWithToken = useCallback(async (token: string) => {
+    const user = await fetchCurrentUser(token);
+    const next: Session = { ...user, token };
+    await saveSession(next);
+    setSession(next);
+    return next;
+  }, []);
+
+  const signOut = useCallback(async () => {
+    await saveSession(null);
+    setSession(null);
+    // The cached feed belongs to the account that fetched it.
+    setPosts([]);
+    await AsyncStorage.removeItem(POSTS_KEY);
+  }, []);
+
+  // The account decides the plan: mirror its tier into settings so anything
+  // displaying it (or enforcing limits app-side) agrees with the backend.
+  useEffect(() => {
+    if (!session) return;
+    if (settingsRef.current.subscriptionTier === session.tier) return;
+    void updateSettings({ subscriptionTier: session.tier });
+  }, [session, updateSettings]);
+
   const fetchPosts = useCallback(async () => {
+    if (!sessionRef.current) return; // no account → nothing to fetch for
     if (fetchInFlightRef.current) return; // never stack two refreshes
     fetchInFlightRef.current = true;
     lastFetchAtRef.current = Date.now();
@@ -896,11 +984,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } finally {
       fetchInFlightRef.current = false;
       setIsFetchingPosts(false);
-      // Chain the next refresh at the plan's pace (0 while the testing switch
-      // keeps every plan instant, which arms no timer), success or failure.
-      scheduleNextFetch(feedRefreshDelayMs(s.subscriptionTier));
+      // Chain the next refresh at the account's pace (admin's 'instant' arms no
+      // timer, so opening the app is the refresh), success or failure.
+      scheduleNextFetch(feedRefreshDelayMs(currentTier()));
     }
-  }, [scheduleNextFetch]);
+  }, [scheduleNextFetch, currentTier]);
 
   const postNow = useCallback(async (
     platform: PlatformId,
@@ -931,13 +1019,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [fetchPosts]);
 
   useEffect(() => {
-    if (!hydrated) return; // wait until the stored feed has been restored
+    if (!hydrated || !session) return; // wait for the stored feed *and* an account
     if (refreshAllowed()) void fetchPosts();
-  }, [hydrated, fetchPosts, refreshAllowed]);
+  }, [hydrated, session, fetchPosts, refreshAllowed]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
       if (state !== 'active' || fetchInFlightRef.current) return;
+      if (!sessionRef.current) return;
       if (!refreshAllowed()) return;
       void fetchPosts();
     });
@@ -997,8 +1086,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await fetch(`${API_BASE_URL}/post/${pid}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, userId: 'local-user', subreddit }),
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        body: JSON.stringify({
+          content,
+          userId: sessionRef.current?.id ?? 'local-user',
+          subreddit,
+        }),
       });
       if (!res.ok) {
         const err = await res.json() as { error?: string };
@@ -1154,7 +1247,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      settings, posts, composedPost, isFetchingPosts, isRephrasing, lastFetchError,
+      settings, session, authBooted, requestCode, verifyCode, signInWithToken, signOut,
+      posts, composedPost, isFetchingPosts, isRephrasing, lastFetchError,
       updateSettings, updatePlatformSettings, fetchPosts, postNow,
       startCompose, clearCompose, updateBaseContent, updatePlatformDraft,
       toggleSelectedPlatform, setSelectedPlatforms,
