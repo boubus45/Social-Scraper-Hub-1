@@ -157,14 +157,14 @@ export async function subscribeSource(userId: string, platform: PlatformId, user
     const row = existing[0];
     return {
       id: row.id,
-      userId: row.userId,
+      userId: row.user_id,
       platform: row.platform as PlatformId,
       username: row.username,
-      datasetId: row.datasetId ?? undefined,
+      datasetId: row.dataset_id ?? undefined,
       status: row.status as any,
-      lastCollectedAt: row.lastCollectedAt ? (row.lastCollectedAt instanceof Date ? row.lastCollectedAt.toISOString() : String(row.lastCollectedAt)) : undefined,
-      subscriberCount: row.subscriberCount,
-      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
+      lastCollectedAt: row.last_collected_at ? (row.last_collected_at instanceof Date ? row.last_collected_at.toISOString() : String(row.last_collected_at)) : undefined,
+      subscriberCount: row.subscriber_count,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
     };
   }
 
@@ -222,14 +222,14 @@ export async function getSources(userId: string): Promise<ApifySource[]> {
   for (const row of rows) {
     result.push({
       id: row.id,
-      userId: row.userId,
+      userId: row.user_id,
       platform: row.platform as PlatformId,
       username: row.username,
-      datasetId: row.datasetId ?? undefined,
+      datasetId: row.dataset_id ?? undefined,
       status: row.status as any,
-      lastCollectedAt: row.lastCollectedAt ? (row.lastCollectedAt instanceof Date ? row.lastCollectedAt.toISOString() : String(row.lastCollectedAt)) : undefined,
-      subscriberCount: row.subscriberCount,
-      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
+      lastCollectedAt: row.last_collected_at ? (row.last_collected_at instanceof Date ? row.last_collected_at.toISOString() : String(row.last_collected_at)) : undefined,
+      subscriberCount: row.subscriber_count,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
     });
   }
   return result;
@@ -255,21 +255,21 @@ export async function getFeed(userId: string, options: { platform?: string; limi
     result.push({
       id: row.id,
       platform: row.platform as PlatformId,
-      platformPostId: row.platformPostId,
+      platformPostId: row.platform_post_id,
       username: row.username,
       url: row.url,
       text: row.text ?? '',
-      publishedAt: row.publishedAt ? (row.publishedAt instanceof Date ? row.publishedAt.toISOString() : String(row.publishedAt)) : undefined,
+      publishedAt: row.published_at ? (row.published_at instanceof Date ? row.published_at.toISOString() : String(row.published_at)) : undefined,
       media: row.media as any,
       metrics: row.metrics as any,
       author: row.author ?? undefined,
-      authorHandle: row.authorHandle ?? undefined,
-      sourceKey: row.sourceKey ?? undefined,
-      sourceLabel: row.sourceLabel ?? undefined,
-      sourceKind: row.sourceKind ?? undefined,
-      isOfficial: row.isOfficial ?? undefined,
-      mediaItems: row.mediaItems as any,
-      isNew: row.isNew ?? undefined,
+      authorHandle: row.author_handle ?? undefined,
+      sourceKey: row.source_key ?? undefined,
+      sourceLabel: row.source_label ?? undefined,
+      sourceKind: row.source_kind ?? undefined,
+      isOfficial: row.is_official ?? undefined,
+      mediaItems: row.media_items as any,
+      isNew: row.is_new ?? undefined,
     });
   }
   return result;
