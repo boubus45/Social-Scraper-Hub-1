@@ -302,6 +302,7 @@ export async function collectPlatform(userId: string, platform: string, username
         accounts: [username],
         maxPostsPerAccount: 20,
         limit: 20,
+        onlyNew: false,
         sourceId: source[0].id,
       }),
     }
