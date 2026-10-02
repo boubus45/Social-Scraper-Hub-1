@@ -300,8 +300,8 @@ export async function collectPlatform(userId: string, platform: string, username
       body: JSON.stringify({
         platform,
         username,
-        maxPostsPerAccount: 25,
-        limit: 25,
+        maxPostsPerAccount: 20,
+        limit: 20,
         sourceId: source[0].id,
       }),
     }
