@@ -299,7 +299,7 @@ export async function collectPlatform(userId: string, platform: string, username
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         platform,
-        username,
+        accounts: [username],
         maxPostsPerAccount: 20,
         limit: 20,
         sourceId: source[0].id,
