@@ -268,7 +268,7 @@ export async function getFeed(userId: string, options: { platform?: string; limi
 
   const result: any[] = [];
   for (const row of posts) {
-    const fallback = extractAuthorFromSourceLabel(row.source_label);
+    const fallback = extractAuthorFromSourceLabel(row.sourceLabel);
     result.push({
       id: row.id,
       platform: row.platform as PlatformId,
