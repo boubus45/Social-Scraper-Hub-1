@@ -395,11 +395,26 @@ async function fetchAndStoreDataset(sourceId: string, datasetId: string, userId:
 
 /** Normalize Apify item to our post format */
 function normalizeApifyItem(item: any): any | null {
+  // The unified actor returns data in this format:
+  // { platform, account: {username}, post: {id, url, text, publishedAt, media}, metrics, monitorId }
+  // Or for Reddit: { platform, account, post: {id, url, text, publishedAt, media}, metrics, monitorId }
+  
   const platform = item.platform ?? item.platform_type ?? 'unknown';
+  const postData = item.post ?? item;
+  const accountData = item.account ?? {};
   
   const media: Array<{ type: 'image' | 'video'; url: string }> = [];
   
-  // Handle different platform media formats
+  // Handle media from post.media array
+  if (postData.media && Array.isArray(postData.media)) {
+    for (const m of postData.media) {
+      if (m.url && m.type) {
+        media.push({ type: m.type, url: m.url });
+      }
+    }
+  }
+  
+  // Also check for direct media fields (legacy format)
   if (item.video_url && typeof item.video_url === 'string' && item.video_url.startsWith('http')) {
     media.push({ type: 'video', url: item.video_url });
   }
@@ -423,25 +438,29 @@ function normalizeApifyItem(item: any): any | null {
     }
   }
 
+  const username = accountData.username ?? item.username ?? item.handle ?? 'unknown';
+  const author = accountData.displayName ?? item.author ?? item.author_name ?? item.full_name ?? item.name ?? username;
+  const authorHandle = accountData.username ? `@${accountData.username}` : (item.authorHandle ?? item.author_username ?? item.username ?? item.handle ?? undefined);
+
   return {
     platform: platform as any,
-    platformPostId: item.id ?? item.post_id ?? item.id_str,
-    url: item.url ?? item.post_url ?? `https://${platform}.com/${item.username ?? 'unknown'}`,
-    text: item.text ?? item.caption ?? item.content ?? item.description ?? '',
-    publishedAt: item.publishedAt ?? item.created_at ?? item.datetime ?? item.timestamp ?? new Date().toISOString(),
+    platformPostId: postData.id ?? item.id ?? item.post_id ?? item.id_str,
+    url: postData.url ?? item.url ?? item.post_url ?? `https://${platform}.com/${username}`,
+    text: postData.text ?? item.text ?? item.caption ?? item.content ?? item.description ?? '',
+    publishedAt: postData.publishedAt ?? item.publishedAt ?? item.created_at ?? item.datetime ?? item.timestamp ?? new Date().toISOString(),
     media,
     metrics: {
-      likes: item.likes ?? item.like_count ?? 0,
-      comments: item.comments ?? item.comments_count ?? 0,
-      shares: item.shares ?? item.share_count ?? 0,
-      views: item.views ?? item.view_count ?? item.play_count ?? 0,
+      likes: postData.metrics?.likes ?? item.likes ?? item.like_count ?? 0,
+      comments: postData.metrics?.comments ?? item.comments ?? item.comments_count ?? 0,
+      shares: postData.metrics?.shares ?? item.shares ?? item.share_count ?? 0,
+      views: postData.metrics?.views ?? item.views ?? item.view_count ?? item.play_count ?? 0,
     },
-    author: item.author ?? item.author_name ?? item.full_name ?? item.username,
-    authorHandle: item.authorHandle ?? item.author_username ?? item.username ?? item.handle,
-    sourceKey: `${platform}:account:${item.username ?? 'unknown'}`,
-    sourceLabel: item.username ?? item.account ?? 'Unknown',
+    author,
+    authorHandle,
+    sourceKey: `${platform}:account:${username}`,
+    sourceLabel: accountData.displayName ?? username ?? item.account ?? 'Unknown',
     sourceKind: 'account',
-    isOfficial: item.is_verified ?? item.verified ?? false,
+    isOfficial: item.is_verified ?? item.verified ?? accountData.is_verified ?? false,
     mediaItems: media,
   };
 }
