@@ -250,20 +250,37 @@ export async function getFeed(userId: string, options: { platform?: string; limi
 
   const posts = await db.select().from(apifyPosts).where(and(...conditions)).orderBy(desc(apifyPosts.publishedAt)).limit(limit);
 
+  function extractAuthorFromSourceLabel(sourceLabel: string | null | undefined): { author?: string; authorHandle?: string } {
+  if (!sourceLabel) return {};
+  try {
+    const parsed = JSON.parse(sourceLabel);
+    if (parsed.username) {
+      return { author: parsed.username, authorHandle: `@${parsed.username}` };
+    }
+  } catch {
+    // Not JSON, treat as plain username
+    if (sourceLabel && sourceLabel !== 'Unknown') {
+      return { author: sourceLabel, authorHandle: `@${sourceLabel}` };
+    }
+  }
+  return {};
+}
+
   const result: any[] = [];
   for (const row of posts) {
+    const fallback = extractAuthorFromSourceLabel(row.source_label);
     result.push({
       id: row.id,
       platform: row.platform as PlatformId,
       platformPostId: row.platform_post_id,
-      username: row.username,
+      username: row.username ?? fallback.authorHandle?.replace('@', ''),
       url: row.url,
       text: row.text ?? '',
       publishedAt: row.published_at ? (row.published_at instanceof Date ? row.published_at.toISOString() : String(row.published_at)) : undefined,
       media: row.media as any,
       metrics: row.metrics as any,
-      author: row.author ?? undefined,
-      authorHandle: row.author_handle ?? undefined,
+      author: row.author ?? fallback.author,
+      authorHandle: row.author_handle ?? fallback.authorHandle,
       sourceKey: row.source_key ?? undefined,
       sourceLabel: row.source_label ?? undefined,
       sourceKind: row.source_kind ?? undefined,
