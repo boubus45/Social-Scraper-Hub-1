@@ -1,10 +1,6 @@
 import "dotenv/config";
 import app from "./app";
 import { logger } from "./lib/logger";
-import {
-  initBrightDataCollection,
-  shutdownBrightDataCollection,
-} from "./services/brightDataCollection";
 
 const rawPort = process.env["PORT"];
 
@@ -20,10 +16,6 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-// Restore persisted sources/posts before accepting requests, so a restart can
-// never serve a half-empty feed or let a request overwrite what was loaded.
-await initBrightDataCollection();
-
 const server = app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
@@ -35,9 +27,6 @@ const server = app.listen(port, (err) => {
 
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   logger.info({ signal }, "Shutting down");
-  // Flush pending writes first: without this the last second of ingested posts
-  // would be lost.
-  await shutdownBrightDataCollection();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();
 }
