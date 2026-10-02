@@ -1,0 +1,11 @@
+{
+  "actorSpecification": 1,
+  "name": "social-scraper-x-monitor",
+  "title": "Social Scraper X (Twitter) Monitor",
+  "description": "Collects newly visible public X/Twitter posts for configured usernames and returns normalized records. Requires session cookies for authenticated access.",
+  "version": "1.0",
+  "build": {
+    "dockerfile": "./Dockerfile"
+  },
+  "input": "./INPUT_SCHEMA.json"
+}

@@ -1,0 +1,11 @@
+{
+  "actorSpecification": 1,
+  "name": "social-scraper-linkedin-monitor",
+  "title": "Social Scraper LinkedIn Monitor",
+  "description": "Collects newly visible public LinkedIn posts for configured profiles and returns normalized records. Requires session cookies for authenticated access.",
+  "version": "1.0",
+  "build": {
+    "dockerfile": "./Dockerfile"
+  },
+  "input": "./INPUT_SCHEMA.json"
+}

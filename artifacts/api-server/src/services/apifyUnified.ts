@@ -8,14 +8,31 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 4 })
 const db = drizzle(pool, { schema: { users, apifyConfigs, apifySources, apifyPosts, apifyRuns } });
 
 const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN;
-const APIFY_ACTOR_ID = process.env.APIFY_UNIFIED_ACTOR_ID ?? process.env.APIFY_SOCIAL_MONITOR_ACTOR_ID;
+const APIFY_UNIFIED_ACTOR_ID = process.env.APIFY_UNIFIED_ACTOR_ID ?? process.env.APIFY_SOCIAL_MONITOR_ACTOR_ID;
+
+// Platform-specific actor IDs (can be overridden via env vars)
+const PLATFORM_ACTOR_IDS: Record<string, string | undefined> = {
+  instagram: process.env.APIFY_INSTAGRAM_ACTOR_ID ?? APIFY_UNIFIED_ACTOR_ID,
+  reddit: process.env.APIFY_REDDIT_ACTOR_ID ?? APIFY_UNIFIED_ACTOR_ID,
+  tiktok: process.env.APIFY_TIKTOK_ACTOR_ID,
+  x: process.env.APIFY_X_ACTOR_ID,
+  facebook: process.env.APIFY_FACEBOOK_ACTOR_ID,
+  linkedin: process.env.APIFY_LINKEDIN_ACTOR_ID,
+};
 
 if (!APIFY_API_TOKEN) {
   logger.warn("APIFY_API_TOKEN not set — Apify collections will fail");
 }
-if (!APIFY_ACTOR_ID) {
-  logger.warn("APIFY_UNIFIED_ACTOR_ID not set — will use legacy actor");
+if (!APIFY_UNIFIED_ACTOR_ID) {
+  logger.warn("APIFY_UNIFIED_ACTOR_ID not set — unified actor unavailable");
 }
+
+// Check which platforms have actors configured
+Object.entries(PLATFORM_ACTOR_IDS).forEach(([platform, actorId]) => {
+  if (!actorId) {
+    logger.warn(`No actor configured for ${platform} (set APIFY_${platform.toUpperCase()}_ACTOR_ID)`);
+  }
+});
 
 export type PlatformId = 'instagram' | 'tiktok' | 'x' | 'facebook' | 'reddit' | 'linkedin';
 
@@ -157,14 +174,14 @@ export async function subscribeSource(userId: string, platform: PlatformId, user
     const row = existing[0];
     return {
       id: row.id,
-      userId: row.user_id,
+      userId: row.userId,
       platform: row.platform as PlatformId,
       username: row.username,
-      datasetId: row.dataset_id ?? undefined,
+      datasetId: row.datasetId ?? undefined,
       status: row.status as any,
-      lastCollectedAt: row.last_collected_at ? (row.last_collected_at instanceof Date ? row.last_collected_at.toISOString() : String(row.last_collected_at)) : undefined,
-      subscriberCount: row.subscriber_count,
-      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      lastCollectedAt: row.lastCollectedAt ? (row.lastCollectedAt instanceof Date ? row.lastCollectedAt.toISOString() : String(row.lastCollectedAt)) : undefined,
+      subscriberCount: row.subscriberCount,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
     };
   }
 
@@ -180,7 +197,7 @@ export async function subscribeSource(userId: string, platform: PlatformId, user
     subscriberCount: 1,
     createdAt: now,
     updatedAt: now,
-  } as any);
+  });
 
   // Update platform config to include this account
   const config = await getPlatformConfig(userId, platform);
@@ -220,16 +237,38 @@ export async function getSources(userId: string): Promise<ApifySource[]> {
   const rows = await db.select().from(apifySources).where(eq(apifySources.userId, userId));
   const result: ApifySource[] = [];
   for (const row of rows) {
+    // Robust date serialization - handle Date objects, strings, and null/undefined
+    let createdAt: string;
+    if (row.createdAt instanceof Date) {
+      createdAt = row.createdAt.toISOString();
+    } else if (row.createdAt) {
+      // If it's already a string or number, convert to Date then ISO
+      const date = new Date(row.createdAt);
+      createdAt = isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+    } else {
+      createdAt = new Date().toISOString();
+    }
+    
+    let lastCollectedAt: string | undefined;
+    if (row.lastCollectedAt) {
+      if (row.lastCollectedAt instanceof Date) {
+        lastCollectedAt = row.lastCollectedAt.toISOString();
+      } else {
+        const date = new Date(row.lastCollectedAt);
+        lastCollectedAt = isNaN(date.getTime()) ? undefined : date.toISOString();
+      }
+    }
+    
     result.push({
       id: row.id,
-      userId: row.user_id,
+      userId: row.userId,
       platform: row.platform as PlatformId,
       username: row.username,
-      datasetId: row.dataset_id ?? undefined,
+      datasetId: row.datasetId ?? undefined,
       status: row.status as any,
-      lastCollectedAt: row.last_collected_at ? (row.last_collected_at instanceof Date ? row.last_collected_at.toISOString() : String(row.last_collected_at)) : undefined,
-      subscriberCount: row.subscriber_count,
-      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+      lastCollectedAt,
+      subscriberCount: row.subscriberCount,
+      createdAt,
     });
   }
   return result;
@@ -272,31 +311,66 @@ export async function getFeed(userId: string, options: { platform?: string; limi
     result.push({
       id: row.id,
       platform: row.platform as PlatformId,
-      platformPostId: row.platform_post_id,
+      platformPostId: row.platformPostId,
       username: row.username ?? fallback.authorHandle?.replace('@', ''),
       url: row.url,
       text: row.text ?? '',
-      publishedAt: row.published_at ? (row.published_at instanceof Date ? row.published_at.toISOString() : String(row.published_at)) : undefined,
+      publishedAt: row.publishedAt ? (row.publishedAt instanceof Date ? row.publishedAt.toISOString() : String(row.publishedAt)) : undefined,
       media: row.media as any,
       metrics: row.metrics as any,
       author: row.author ?? fallback.author,
-      authorHandle: row.author_handle ?? fallback.authorHandle,
-      sourceKey: row.source_key ?? undefined,
-      sourceLabel: row.source_label ?? undefined,
-      sourceKind: row.source_kind ?? undefined,
-      isOfficial: row.is_official ?? undefined,
-      mediaItems: row.media_items as any,
-      isNew: row.is_new ?? undefined,
+      authorHandle: row.authorHandle ?? fallback.authorHandle,
+      sourceKey: row.sourceKey ?? undefined,
+      sourceLabel: row.sourceLabel ?? undefined,
+      sourceKind: row.sourceKind ?? undefined,
+      isOfficial: row.isOfficial ?? undefined,
+      mediaItems: row.mediaItems as any,
+      isNew: row.isNew ?? undefined,
     });
   }
   return result;
 }
 
+/** Get the actor ID for a platform */
+function getActorId(platform: string): string {
+  const actorId = PLATFORM_ACTOR_IDS[platform];
+  if (!actorId) {
+    throw new Error(`No Apify actor configured for platform: ${platform}. Set APIFY_${platform.toUpperCase()}_ACTOR_ID`);
+  }
+  return actorId;
+}
+
+/** Build input for platform-specific actor */
+function buildActorInput(platform: string, username: string, sourceId: string): any {
+  const baseInput = {
+    maxPostsPerAccount: 20,
+    limit: 20,
+    onlyNew: false,
+    monitorId: sourceId,
+  };
+
+  switch (platform) {
+    case 'instagram':
+    case 'tiktok':
+    case 'x':
+    case 'linkedin':
+      return { ...baseInput, accounts: [username] };
+    case 'reddit':
+      return { ...baseInput, sources: [username], platform: 'reddit' };
+    case 'facebook':
+      return { ...baseInput, pages: [username] };
+    default:
+      return { ...baseInput, accounts: [username], platform };
+  }
+}
+
 /** Trigger collection for a specific platform/account via Apify */
 export async function collectPlatform(userId: string, platform: string, username: string): Promise<{ runId: string; datasetId?: string; added: number }> {
-  if (!APIFY_API_TOKEN || !APIFY_ACTOR_ID) {
-    throw new Error("Apify not configured (APIFY_API_TOKEN or APIFY_UNIFIED_ACTOR_ID missing)");
+  if (!APIFY_API_TOKEN) {
+    throw new Error("Apify not configured (APIFY_API_TOKEN missing)");
   }
+
+  const actorId = getActorId(platform);
 
   const source = await db.select().from(apifySources)
     .where(and(eq(apifySources.userId, userId), eq(apifySources.platform, platform), eq(apifySources.username, username)))
@@ -309,19 +383,14 @@ export async function collectPlatform(userId: string, platform: string, username
   const sourceRecord = source[0];
 
   // Trigger Apify actor run
+  const actorInput = buildActorInput(platform, username, source[0].id);
+  
   const response = await fetch(
-    `https://api.apify.com/v2/acts/${encodeURIComponent(APIFY_ACTOR_ID)}/runs?token=${encodeURIComponent(APIFY_API_TOKEN)}&waitForFinish=120`,
+    `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/runs?token=${encodeURIComponent(APIFY_API_TOKEN)}&waitForFinish=120`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        platform,
-        accounts: [username],
-        maxPostsPerAccount: 20,
-        limit: 20,
-        onlyNew: false,
-        sourceId: source[0].id,
-      }),
+      body: JSON.stringify(actorInput),
     }
   );
 
@@ -460,11 +529,32 @@ function normalizeApifyItem(item: any): any | null {
   const author = accountData.displayName ?? item.author ?? item.author_name ?? item.full_name ?? item.name ?? username;
   const authorHandle = accountData.username ? `@${accountData.username}` : (item.authorHandle ?? item.author_username ?? item.username ?? item.handle ?? undefined);
 
+  // Explicitly extract text from post object (Apify unified actor puts text in post.text)
+  // Also handle cases where text might be in different fields
+  const text = postData.text ?? item.post?.text ?? item.text ?? item.caption ?? item.content ?? item.description ?? 
+               postData.caption ?? postData.caption_text ?? postData.accessibility_caption ?? 
+               postData.selftext ?? item.selftext ?? '';
+
+  // Debug log for text extraction
+  if (!text || text.trim() === '') {
+    logger.warn({ 
+      platform, 
+      postId: postData.id ?? item.id,
+      hasPostData: !!postData,
+      postKeys: Object.keys(postData),
+      itemKeys: Object.keys(item),
+      postDataText: postData.text,
+      itemText: item.text,
+      caption: item.caption,
+      selftext: item.selftext,
+    }, 'Text extraction resulted in empty string');
+  }
+
   return {
     platform: platform as any,
     platformPostId: postData.id ?? item.id ?? item.post_id ?? item.id_str,
     url: postData.url ?? item.url ?? item.post_url ?? `https://${platform}.com/${username}`,
-    text: postData.text ?? item.text ?? item.caption ?? item.content ?? item.description ?? '',
+    text,
     publishedAt: postData.publishedAt ?? item.publishedAt ?? item.created_at ?? item.datetime ?? item.timestamp ?? new Date().toISOString(),
     media,
     metrics: {

@@ -1,0 +1,43 @@
+{
+  "title": "X (Twitter) Monitor Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "accounts": {
+      "title": "X accounts",
+      "type": "array",
+      "description": "Public X/Twitter usernames without the @ prefix.",
+      "editor": "stringList",
+      "items": { "type": "string" }
+    },
+    "maxPostsPerAccount": {
+      "title": "Maximum new posts per account",
+      "description": "Maximum number of new posts to return for each account.",
+      "type": "integer",
+      "editor": "number",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 20
+    },
+    "onlyNew": {
+      "title": "Return only new posts",
+      "description": "Exclude post IDs already seen for this monitor.",
+      "type": "boolean",
+      "editor": "checkbox",
+      "default": true
+    },
+    "monitorId": {
+      "title": "Monitor identifier",
+      "type": "string",
+      "editor": "textfield",
+      "description": "Opaque identifier supplied by the Social Scraper backend."
+    },
+    "cookies": {
+      "title": "X session cookies",
+      "type": "string",
+      "editor": "textarea",
+      "description": "Semicolon-separated session cookies (auth_token, ct0, twid, etc.) for authenticated access."
+    }
+  },
+  "required": ["accounts", "monitorId"]
+}

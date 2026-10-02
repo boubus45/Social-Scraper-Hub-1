@@ -1,0 +1,43 @@
+{
+  "title": "LinkedIn Monitor Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "accounts": {
+      "title": "LinkedIn profiles",
+      "type": "array",
+      "description": "LinkedIn profile usernames (from /in/username or just the username).",
+      "editor": "stringList",
+      "items": { "type": "string" }
+    },
+    "maxPostsPerAccount": {
+      "title": "Maximum new posts per account",
+      "description": "Maximum number of new posts to return for each account.",
+      "type": "integer",
+      "editor": "number",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 20
+    },
+    "onlyNew": {
+      "title": "Return only new posts",
+      "description": "Exclude post IDs already seen for this monitor.",
+      "type": "boolean",
+      "editor": "checkbox",
+      "default": true
+    },
+    "monitorId": {
+      "title": "Monitor identifier",
+      "type": "string",
+      "editor": "textfield",
+      "description": "Opaque identifier supplied by the Social Scraper backend."
+    },
+    "cookies": {
+      "title": "LinkedIn session cookies",
+      "type": "string",
+      "editor": "textarea",
+      "description": "Semicolon-separated session cookies (li_at, JSESSIONID, etc.) for authenticated access."
+    }
+  },
+  "required": ["accounts", "monitorId"]
+}

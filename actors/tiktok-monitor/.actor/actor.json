@@ -1,0 +1,11 @@
+{
+  "actorSpecification": 1,
+  "name": "social-scraper-tiktok-monitor",
+  "title": "Social Scraper TikTok Monitor",
+  "description": "Collects newly visible public TikTok posts for configured usernames and returns normalized records.",
+  "version": "1.0",
+  "build": {
+    "dockerfile": "./Dockerfile"
+  },
+  "input": "./INPUT_SCHEMA.json"
+}
