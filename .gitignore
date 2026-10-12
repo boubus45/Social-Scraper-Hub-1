@@ -56,6 +56,13 @@ artifacts/api-server/.env
 artifacts/api-server/.env.*
 !artifacts/api-server/.env.example
 
+# MCP config with tokens
+.mcp.json
+
+# Auth guide with real credentials (local only)
+Authentication_Setup_Guide.docx
+Authentication_Setup_Guide.md
+
 # Bright Data snapshot (used instead of Postgres when DATABASE_URL is unset)
 artifacts/api-server/.brightdata-state.json
 artifacts/api-server/.brightdata-state.json.tmp
